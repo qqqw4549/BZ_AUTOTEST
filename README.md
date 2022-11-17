@@ -1,2 +1,0 @@
-# BZ_AUTOTEST
-NONE
