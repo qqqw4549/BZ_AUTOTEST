@@ -1,0 +1,73 @@
+#ifndef BZ_TALISE_H
+#define BZ_TALISE_H
+#include <bz_data_types.h>
+#include "bz_jesd204b_types.h"
+#include "bz_gpio_types.h"
+int32_t open_device(uint32_t device_id);
+int32_t close_device();
+int32_t rest_device(void);
+int32_t wait_boot_status(void);
+int32_t load_firmware(void);
+int32_t wait_firmware_ready(void);
+int32_t load_config(void);
+int32_t write_profile(void);
+int32_t wait_profile_done(void);
+int32_t set_rf_pll_freq(uint64_t freq_hz);
+int32_t set_aux_pll_freq(uint64_t freq_hz);
+int32_t wait_pll_lock_done(void);
+int32_t run_cals(uint32_t mask);
+int32_t wait_cals_done(void);
+int32_t getcals_status();
+void start_204b_sysc(void);
+void end_204b_sysc(void);
+int32_t jesd204b_sysc_is_ok();
+int32_t jesd204b_config(void);
+uint32_t start_auxadc(BzAuxAdcConfig_t *auxAdcConfig);
+uint32_t read_auxadc(BzAuxAdcResult_t *auxAdcConfig);
+uint32_t setup_auxdac(uint16_t Gpio3V3Num);
+uint32_t write_auxdac(uint16_t Gpio3V3Num,uint16_t auxDacCode);
+int32_t jesd204b_cfgchange( BzTxConfig_t stTx204BParam, BzRxOrXConfig_t stRx204BParam );
+int32_t wait_jesd204b_config(void);
+int32_t radio_on(int32_t siMode);
+int32_t tx1_tone(uint32_t freq1_khz,int32_t gain1);
+int32_t tx2_tone(uint32_t freq2_khz,int32_t gain2);
+uint32_t get_204();
+uint32_t recv_orx_data(uint32_t points, uint32_t channels);
+uint32_t test_tx_data();
+uint32_t debug_data(uint32_t addr,uint32_t position,uint32_t count,uint32_t rate);
+uint32_t getrxdecpower(BzAuxAdcChannels_t rxChannel);
+uint32_t recv_rx_data(uint32_t points, uint32_t channels);
+uint32_t get_radio_state();
+uint32_t read_reg(uint16_t addr);
+uint32_t read_regbit(uint16_t addr,uint32_t endbit,uint32_t startbit);
+uint32_t write_reg(uint16_t addr ,uint32_t data);
+uint32_t write_regbit(uint16_t addr ,uint32_t endbit,uint32_t startbit,uint32_t data);
+uint32_t get_path();
+uint32_t set_path(int siRX,int siORX,int siTX);
+uint32_t settxgain(uint32_t channels, uint8_t gainIndexTx);
+uint32_t setrxgain(uint32_t channels, uint8_t gainIndexRx);
+uint32_t getgain(uint32_t channels);
+void init_process();
+void end_process();
+uint32_t sdk_example(int siMode);
+void InfoShow();
+void getlog();
+uint32_t fpga_send();
+void auto_test(uint32_t auto_test);
+void RRUrun(uint32_t siMode);
+void get_pllfreq();
+void set_204b_tx(uint32_t enable);
+void set_204b_rx(uint32_t enable);
+void set_204b_orx(uint32_t enable);
+void sysref_control(uint32_t ONOFF);
+void en_slicer(uint32_t channels,uint32_t enable);
+void setrxgainCtrl(uint32_t ulMode,uint32_t ulCtrlWay);
+void getrxgainCtrl();
+void setorxgainCtrl(uint32_t ulMode,uint32_t ulCtrlWay);
+void toneoff();
+uint32_t getorxdecpower(BzAuxAdcChannels_t auxadcChannel);
+void set_agc();
+void riscv_trace();
+void getorxgainCtrl();
+uint32_t setorxgain(uint32_t channels ,uint8_t gainIndexOrx);
+#endif

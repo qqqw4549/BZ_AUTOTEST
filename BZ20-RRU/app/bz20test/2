@@ -1,0 +1,43 @@
+#include "testcase.h"
+#include "bz_talise.h"
+#include "bz_data_types.h"
+
+uint32_t gulLogLevel = 1;
+
+void BZ_mainTest(uint32_t ulMode,uint32_t ulLogLevel)
+{
+    char str[]= {"auto_test_spi_mode","auto_test_spi_mode"};
+    
+    gulLogLevel = ulLogLevel;
+    //1.测试bz20 pinmode
+    printf("|***************************************************\n");
+    printf("----------------%s------------------\n",str[ulMode-1]);
+    printf("|***************************************************\n\n");
+    //RRUrun(mode);
+    
+    //1.测试SPI读写 
+    BZ_SpiTest(0x1CE);
+    
+    //
+
+    read_regbit
+    write_regbit
+    close_device();
+}
+
+uint32_t BZ_Rand(uint32_t start,uint32_t end)
+{
+    return (rand() % start + end);
+}
+
+void BZ_SpiTest(uint32_t Addr)
+{
+    uint32_t i=0,ulVal=0,ulRET=0;
+    for(i=0 ;i<100 ;i++)
+    {
+        ulVal = BZ_Rand(0,0xFFFFFFFF);
+        write_reg(Addr,ulVal);
+        read_regbit
+        
+    }
+}

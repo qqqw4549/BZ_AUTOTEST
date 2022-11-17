@@ -1,0 +1,1 @@
+source /opt/petalinux/2020.1/environment-setup-aarch64-xilinx-linux

@@ -1,0 +1,1291 @@
+#include "talise.h"
+#include "plaxi.h"
+#include "fft.h"
+
+extern "C" 
+{
+#include "bz_config.h"
+
+#include <appclock.h>
+#include <bz_plat_hal.h>
+#include <bz_init.h>
+#include <bz_jesd204b.h>
+#include <bz_radio.h>
+#include <bz_tx.h>
+#include <bz_rx.h>
+#include <bz_cals.h>
+#include <bz_agc.h>
+
+#include <bz_error.h>
+#include <bz_riscv.h>
+#include <bz_hal.h>
+#include <bz_reg_dig.h>
+}
+
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+
+#include <cstdio>
+#include <cstring>
+#include <vector>
+#include <iostream>
+#include <sstream>
+#include <iomanip>
+
+#define PLAXI_NAME "/dev/plaxi"
+#define MEM_NAME   "/dev/mem"
+#define TX_204B_OFFSET  0x30000000
+#define TX_204B_SIZE    0x8000000
+#define RX_204B_OFFSET  0x38000000
+#define RX_204B_SIZE    0x8000000
+
+#define DATA_SIZE 19660800
+
+Talise::Talise()
+: dev_id_(0)
+, dev1_config_(B20Init)
+, dev2_config_(B20Init)
+, rf_freq(3501600000)
+, aux_freq(3501600000)
+, plaxi_file_(open(PLAXI_NAME, O_RDWR))
+, mem_file_(open(MEM_NAME, O_RDWR | O_SYNC))
+, tx_data((char *)mmap(0, TX_204B_SIZE, 
+        PROT_WRITE | PROT_READ, MAP_SHARED, mem_file_, TX_204B_OFFSET))
+, rx_data((char *)mmap(0, RX_204B_SIZE, 
+        PROT_READ | PROT_WRITE, MAP_SHARED, mem_file_, RX_204B_OFFSET))
+{
+}
+
+Talise::~Talise()
+{
+    munmap(tx_data, TX_204B_SIZE);
+    munmap(rx_data, RX_204B_SIZE);
+    close(plaxi_file_);
+    close(mem_file_);
+    appclock_term();
+    BZ_closeHw(&device_);
+}
+
+bool Talise::set_device_id(int device_id)
+{
+    if(device_id == 0 || device_id == 1){
+        dev_id_ = device_id;
+        return true;
+    }
+    return false;
+}
+bool Talise::init_clock()
+{
+    appclock_init();
+    appclock_sync();
+    return true;
+}
+
+std::string Talise::dev_name()
+{
+    if(dev_id_ == 0)
+        return std::string("baize1");
+    else if(dev_id_ == 1)
+        return std::string("baize2");
+    return std::string();
+}
+
+std::string Talise::rx_channel()
+{
+    if(dev_config()->rx.rxChannels == BZ_RX1)
+        return std::string("rx1on");
+    else if(dev_config()->rx.rxChannels == BZ_RX2)
+        return std::string("rx2on");
+    else if(dev_config()->rx.rxChannels == BZ_RX1RX2)
+        return std::string("rx1rx2on");
+    return std::string("rxoff");
+}
+
+std::string Talise::tx_channel()
+{
+    if(dev_config()->tx.txChannels == BZ_TX1)
+        return std::string("tx1on");
+    else if(dev_config()->tx.txChannels ==  BZ_TX2)
+        return std::string("tx2on");
+    else if(dev_config()->tx.txChannels ==  BZ_TX1TX2)
+        return std::string("tx1tx2on");
+    return std::string("txoff");
+}
+
+std::string Talise::ox_channel()
+{
+    if(dev_config()->obsRx.obsRxChannelsEnable == BZ_ORX1)
+        return std::string("orx1on");
+    else if(dev_config()->obsRx.obsRxChannelsEnable == BZ_ORX2)
+        return std::string("orx2on");
+    else if(dev_config()->obsRx.obsRxChannelsEnable == BZ_ORX1ORX2)
+        return std::string("orx1orx2on");
+    return std::string("orxoff");
+}
+
+std::string Talise::channel_ctrl_mode()
+{
+    return mode_ == BZ_SPI_MODE ? std::string("spimode") : std::string("pinmode");
+}
+
+uint32_t Talise::rx_band_width_hz()
+{
+    return dev_config()->rx.rxProfile.rfBandwidth_Hz;
+}
+
+uint32_t Talise::tx_band_width_hz()
+{
+    return dev_config()->tx.txProfile.rfBandwidth_Hz;
+}
+
+uint32_t Talise::ox_band_width_hz()
+{
+    return dev_config()->obsRx.orxProfile.rfBandwidth_Hz;
+}
+
+uint32_t Talise::rx_iq_rate_khz()
+{
+     return dev_config()->rx.rxProfile.rxOutputRate_kHz;
+}
+uint32_t Talise::tx_iq_rate_khz()
+{
+     return dev_config()->tx.txProfile.txInputRate_kHz;
+}
+uint32_t Talise::ox_iq_rate_khz()
+{
+    return dev_config()->obsRx.orxProfile.orxOutputRate_kHz;
+}
+
+void Talise::set_dev_name(std::string const& name)
+{
+    if(name == "baize1")
+        dev_id_ = 0;
+    else if(name == "baize2")
+        dev_id_ = 1;
+}
+
+void Talise::set_rx_channel(std::string const& channel)
+{
+    if(channel == "rx1on")
+        dev_config()->rx.rxChannels = BZ_RX1;
+    else if(channel == "rx2on")
+        dev_config()->rx.rxChannels = BZ_RX2;
+    else if(channel == "rx1rx2on")
+        dev_config()->rx.rxChannels = BZ_RX1RX2;
+    else
+        dev_config()->rx.rxChannels = BZ_RXOFF;
+}
+void Talise::set_tx_channel(std::string const& channel)
+{
+    if(channel == "tx1on")
+        dev_config()->tx.txChannels = BZ_TX1;
+    else if(channel == "tx2on")
+        dev_config()->tx.txChannels = BZ_TX2;
+    else if(channel == "tx1tx2on")
+        dev_config()->tx.txChannels = BZ_TX1TX2;
+    else
+        dev_config()->tx.txChannels = BZ_TXOFF;
+}
+void Talise::set_ox_channel(std::string const& channel)
+{
+    if(channel == "orx1on")
+        dev_config()->obsRx.obsRxChannelsEnable = BZ_ORX1;
+    else if(channel == "orx2on")
+        dev_config()->obsRx.obsRxChannelsEnable = BZ_ORX2;
+    else if(channel == "orx1orx2on")
+        dev_config()->obsRx.obsRxChannelsEnable = BZ_ORX1ORX2;
+    else
+        dev_config()->obsRx.obsRxChannelsEnable = BZ_ORXOFF;
+}
+void Talise::set_channel_ctr_mode(std::string const& mode)
+{
+    if(mode == "spimode")
+        mode_ = BZ_SPI_MODE;
+    else if(mode == "pinmode")
+        mode_ = BZ_PIN_MODE;
+}
+void Talise::set_rx_band_width_hz(uint32_t band_width)
+{
+    dev_config()->rx.rxProfile.rfBandwidth_Hz = band_width;
+}
+void Talise::set_tx_band_width_hz(uint32_t band_width)
+{
+    dev_config()->tx.txProfile.rfBandwidth_Hz = band_width;
+}
+void Talise::set_ox_band_width_hz(uint32_t band_width)
+{
+    dev_config()->obsRx.orxProfile.rfBandwidth_Hz = band_width;  
+}
+void Talise::set_rx_iq_rate_khz(uint32_t iq_rate)
+{
+    dev_config()->rx.rxProfile.rxOutputRate_kHz = iq_rate;
+}
+void Talise::set_tx_iq_rate_khz(uint32_t iq_rate)
+{
+    dev_config()->tx.txProfile.txInputRate_kHz = iq_rate;
+}
+void Talise::set_ox_iq_rate_khz(uint32_t iq_rate)
+{
+    dev_config()->obsRx.orxProfile.orxOutputRate_kHz = iq_rate;
+}
+bool Talise::write_reg(uint16_t addr, uint32_t data)
+{
+    bzHalErr ret = BZ_spiWriteReg(&device_, addr, data);
+    return ret == BZHAL_OK ? true: false;
+}
+
+bool Talise::write_reg(uint16_t addr, uint32_t data, uint8_t end_bit, uint8_t start_bit)
+{
+    bzHalErr ret = BZ_spiWriteField(&device_, addr, data, end_bit, start_bit);
+    return ret == BZHAL_OK ? true: false;
+}
+
+bool Talise::read_reg(uint16_t addr, uint32_t &data)
+{
+    bzHalErr ret = BZ_spiReadReg(&device_, addr, &data);
+    return ret == BZHAL_OK ? true: false;
+}
+
+bool Talise::read_mem(uint32_t addr, uint32_t &data)
+{
+    uint32_t ret = BZ_spiReadMem(&device_, addr, &data);
+    return ret == BZHAL_OK ? true: false;
+}
+
+bool Talise::set_pll_frequency(BzRfPllName_t name, uint64_t freq)
+{
+    uint32_t ret = BZ_setPllFrequency(&device_, name, freq);
+    if(ret != BZHAL_OK)
+        return false;
+    
+    return ret == BZHAL_OK ? true: false;
+}
+
+bool Talise::pll_frequency(BzRfPllName_t name, uint64_t &freq)
+{
+    uint32_t ret = BZ_getPllFrequency(&device_, name, &freq);
+    return ret == BZHAL_OK ? true: false;
+}
+
+bool Talise::set_tx_power(int32_t freq1_khz, int32_t freq2_khz,
+    uint32_t gain1, uint32_t gain2)
+{
+    BzTxDdsTestToneCfg_t config;
+    config.txTone1Freq_kHz = freq1_khz;
+    config.txTone2Freq_kHz = freq2_khz;
+
+    BzTxDdsAttenCfg_t ddsAtten;
+    ddsAtten.txTone0Atten = gain1;
+    ddsAtten.txTone1Atten = gain1;
+    ddsAtten.txTone2Atten = gain2;
+    ddsAtten.txTone3Atten = gain2;
+
+    uint32_t ret = BZ_setDDsFreqConfig(&device_, tx_channel_, config, ddsAtten);
+    return ret == BZHAL_OK ? true: false;
+}
+
+bool Talise::set_tx_gain(uint32_t gain_index)
+{
+    uint32_t ret = BZ_setTxManualGain(&device_, tx_channel_, gain_index);
+
+    return ret == BZHAL_OK ? true: false;
+}
+
+bool Talise::tx_gain(uint32_t &gain_index)
+{
+    int32_t ret =  BZ_getTxGain(&device_, tx_channel_, &gain_index);
+    return ret == BZHAL_OK ? true: false;
+}
+
+bool Talise::set_tx_pa_protection(uint32_t tx_cali_cnt, 
+    uint32_t tx_power_threshold, bool enable)
+{
+    cfg.TxCaliCnt = tx_cali_cnt;
+    cfg.TxPowerThreshold = tx_power_threshold;
+    cfg.Enable = enable ? 1 : 0;
+
+    int32_t ret = BZ_setPaProtectionCfg(&device_, &cfg);
+
+    return ret == BZHAL_OK ? true: false;
+}
+
+void Talise::get_tx_pa_protection(uint32_t &tx_cali_cnt, 
+    uint32_t &tx_power_threshold, bool &enable)
+{
+    tx_cali_cnt = cfg.TxCaliCnt;
+    tx_power_threshold = cfg.TxPowerThreshold;
+    enable = cfg.Enable ? true : false;
+}
+
+bool Talise::send_tx_data(std::string const& filename)
+{
+    std::string filepath = get_filepath(filename);
+    int file = open(filepath.c_str(), O_RDONLY);
+    if(file < 0)
+    {
+        std::cerr << "cannot open filename: " << filepath << std::endl;
+        return false;
+    }
+    
+    uint32_t value = 0;
+    ioctl(plaxi_file_, PLAXI_WRITE_TX_DATA_PARAM, &value);
+
+    std::vector<char> txdata;
+    txdata.resize(DATA_SIZE);
+    ssize_t size = read(file, txdata.data(), txdata.size());
+    
+    if(size < 0){
+        close(file);
+        return false;
+    }
+    memcpy(tx_data, txdata.data(), size);
+    
+    value = ((size / 4 / 1024) << 16);
+    value |= (0x02 << 1);
+    ioctl(plaxi_file_, PLAXI_WRITE_TX_DATA_PARAM, &value);
+    usleep(50 * 1000);
+
+    value = ((size / 4 / 1024) << 16);
+    value |= (0x02 << 1);
+    value |= (0x01 << 4);
+    ioctl(plaxi_file_, PLAXI_WRITE_TX_DATA_PARAM, &value);
+
+    close(file);
+    return true;
+}
+
+bool Talise::check_tx_data(uint32_t value)
+{
+    uint32_t* data = (uint32_t*)tx_data;
+    for(uint32_t i = 0; i < DATA_SIZE / 4; i++)
+    {
+        if(*data != value)
+        {
+            std::cout << "i=" << i << ", " << *data << "!=" << value << std::endl;
+            return false;
+        }
+        data++;
+    }
+    return true;
+}
+
+void Talise::stop_tx_data()
+{
+    uint32_t value = 0;
+    ioctl(plaxi_file_, PLAXI_WRITE_TX_DATA_PARAM, &value);
+}
+
+
+bool Talise::set_rx_gain(uint32_t gain_index)
+{
+    uint32_t ret = BZ_setRxManualGain(&device_, rx_channel_, gain_index);
+    return ret == BZHAL_OK ? true: false;
+}
+
+bool Talise::set_orx_gain(BzObsRxChannels_t channel, uint32_t gain_index)
+{
+    uint32_t ret = BZ_setObsRxManualGain(&device_, channel, gain_index);
+    return ret == BZHAL_OK ? true: false;
+}
+
+std::string Talise::recv_rx_data(uint32_t points, uint32_t channels)
+{
+
+    start_recv_rx_data(points, channels);
+    //recv data;
+    std::string rxData = save_dec_data(points);
+    usleep(30 * 1000);
+    end_recv_rx_data();
+    return rxData;
+}
+
+void Talise::recv_rx_data(uint32_t points, uint32_t channels, DataArray & x,
+    DataArray & rx1_i, DataArray & rx1_q, DataArray & rx1_f,
+    DataArray & rx2_i, DataArray & rx2_q, DataArray & rx2_f)
+{
+    start_recv_rx_data(points, channels);
+
+    int16_t*data =  (int16_t*)rx_data;
+    uint32_t count = points * 2;
+
+    if(channels & 0x01)
+    {
+        rx1_i.resize(count / 4);
+        rx1_q.resize(count / 4);
+    }
+
+    if(channels & 0x02)
+    {
+        rx2_i.resize(count / 4);
+        rx2_q.resize(count / 4);
+    }
+
+    for(uint32_t i = 0; i < count / 4; i++)
+    {
+        int16_t v = data[0];
+        if(channels & 0x01)
+        {
+            rx1_q[i] = double(data[2] >> 2);
+            rx1_i[i] = double(data[3] >> 2);
+        }
+        if(channels & 0x02)
+        {
+            rx2_q[i] = double(data[0] >> 2);
+            rx2_i[i] = double(data[1] >> 2);
+        }
+        data += 4;
+    }
+    x.resize(count / 4);
+    for(size_t i = 0; i < x.size(); i++)
+        x[i] = i;
+    if(channels & 0x01)
+    {
+        CArray cdata(rx1_i.size());
+        for(size_t i = 0; i < cdata.size(); i++)
+        {
+            cdata[i].real(rx1_i[i]);
+            cdata[i].imag (-rx1_q[i]);
+            cdata[i] /= (1<<15);
+        }
+        fft(cdata);
+        rx1_f.resize(rx1_i.size());
+        for(size_t i = 0; i < cdata.size(); i++)
+            rx1_f[i] = 20 * log10(std::abs(cdata[i]));
+    }
+
+    if(channels & 0x02)
+    {
+        CArray cdata(rx2_i.size());
+        for(size_t i = 0; i < cdata.size(); i++)
+        {
+            cdata[i].real(rx2_i[i]);
+            cdata[i].imag (-rx2_q[i]);
+            cdata[i] /= (1<<15);
+        }
+        fft(cdata);
+        rx2_f.resize(rx2_i.size());
+        for(size_t i = 0; i < cdata.size(); i++)
+            rx2_f[i] = 20 * log10(std::abs(cdata[i]));
+
+    }
+
+    usleep(30 * 1000);
+    end_recv_rx_data();
+}
+
+void Talise::start_recv_rx_data(uint32_t points, uint32_t channels)
+{
+    uint32_t value = 0;
+    ioctl(plaxi_file_, PLAXI_READ_IOPAD_PARAM, &value);
+    printf("Reg.RegAddr = 0x5,Reg.RegValue = 0x%x\n", value);
+
+    value &= 0xFFFFFF8F;//0xFFFFFFCF
+    ioctl(plaxi_file_, PLAXI_WRITE_IOPAD_PARAM, &value);
+    ioctl(plaxi_file_, PLAXI_READ_IOPAD_PARAM, &value);
+    printf("Reg.RegAddr = 0x5,Reg.RegValue = 0x%x\n", value);
+    usleep(10 * 1000);
+
+    value |= (channels << 4); // 1 - rx1 2 - rx2 3 -rx1rx2
+    ioctl(plaxi_file_, PLAXI_WRITE_IOPAD_PARAM, &value);
+    ioctl(plaxi_file_, PLAXI_READ_IOPAD_PARAM, &value);
+    printf("Reg.RegAddr = 0x5,Reg.RegValue = 0x%x\n", value);
+    usleep(10 * 1000);
+
+    ioctl(plaxi_file_, PLAXI_READ_RX_DATA_PARAM, &value);
+    printf("Reg.RegAddr = 0x1,Reg.RegValue = 0x%x\n", value);
+    value = 0;
+    ioctl(plaxi_file_, PLAXI_WRITE_RX_DATA_PARAM, &value);
+    ioctl(plaxi_file_, PLAXI_READ_RX_DATA_PARAM, &value);
+    printf("Reg.RegAddr = 0x1,Reg.RegValue = 0x%x\n", value);
+    usleep(10 * 1000);
+
+    value = ((points / 1024) << 16) & 0xFFFF0000;
+    ioctl(plaxi_file_, PLAXI_WRITE_RX_DATA_PARAM, &value);
+    ioctl(plaxi_file_, PLAXI_READ_RX_DATA_PARAM, &value);
+    printf("Reg.RegAddr = 0x1,Reg.RegValue = 0x%x\n", value);
+    usleep(10 * 1000);
+
+    value = ((points / 1024) << 16) & 0xFFFF0000;
+    value |= (0x01 << 3);
+    ioctl(plaxi_file_, PLAXI_WRITE_RX_DATA_PARAM, &value);
+    ioctl(plaxi_file_, PLAXI_READ_RX_DATA_PARAM, &value);
+    printf("Reg.RegAddr = 0x1,Reg.RegValue = 0x%x\n", value);
+    sleep(2);
+
+    value = ((points / 1024) << 16) & 0xFFFF0000;
+    ioctl(plaxi_file_, PLAXI_WRITE_RX_DATA_PARAM, &value);
+    ioctl(plaxi_file_, PLAXI_READ_RX_DATA_PARAM, &value);
+    printf("Reg.RegAddr = 0x1,Reg.RegValue = 0x%x\n", value);
+    usleep(10 * 1000);
+}
+
+void Talise::end_recv_rx_data()
+{
+    uint32_t value = 0;
+    ioctl(plaxi_file_, PLAXI_WRITE_RX_DATA_PARAM, &value);
+    usleep(10 * 1000);
+}
+
+std::string Talise::get_rx_channel()
+{
+    if(rx_channel_ == BZ_RX1)
+        return std::string("rx1on");
+    else if(rx_channel_ == BZ_RX2)
+        return std::string("rx2on");
+    else if(rx_channel_ == BZ_RX1RX2)
+        return std::string("rx1rx2on");
+    return std::string();
+
+}
+
+std::string Talise::recv_orx_data(uint32_t points)
+{
+    uint32_t value = 0;
+    ioctl(plaxi_file_, PLAXI_READ_IOPAD_PARAM, &value);
+    printf("Reg.RegAddr = 0x5,Reg.RegValue = 0x%x\n", value);
+
+    value &= 0xFFFFFF8F;//0xFFFFFFCF
+    ioctl(plaxi_file_, PLAXI_WRITE_IOPAD_PARAM, &value);
+    ioctl(plaxi_file_, PLAXI_READ_IOPAD_PARAM, &value);
+    printf("Reg.RegAddr = 0x5,Reg.RegValue = 0x%x\n", value);
+    usleep(10 * 1000);
+
+    ioctl(plaxi_file_, PLAXI_READ_RX_DATA_PARAM, &value);
+    printf("Reg.RegAddr = 0x1,Reg.RegValue = 0x%x\n", value);
+    value = 0;
+    ioctl(plaxi_file_, PLAXI_WRITE_RX_DATA_PARAM, &value);
+    ioctl(plaxi_file_, PLAXI_READ_RX_DATA_PARAM, &value);
+    printf("Reg.RegAddr = 0x1,Reg.RegValue = 0x%x\n", value);
+    usleep(10 * 1000);
+
+    value = ((points / 1024) << 16) & 0xFFFF0000;
+    ioctl(plaxi_file_, PLAXI_WRITE_RX_DATA_PARAM, &value);
+    ioctl(plaxi_file_, PLAXI_READ_RX_DATA_PARAM, &value);
+    printf("Reg.RegAddr = 0x1,Reg.RegValue = 0x%x\n", value);
+    usleep(10 * 1000);
+
+    value = ((points / 1024) << 16) & 0xFFFF0000;
+    value |= (0x01 << 3);
+    ioctl(plaxi_file_, PLAXI_WRITE_RX_DATA_PARAM, &value);
+    ioctl(plaxi_file_, PLAXI_READ_RX_DATA_PARAM, &value);
+    printf("Reg.RegAddr = 0x1,Reg.RegValue = 0x%x\n", value);
+    sleep(2);
+
+    value = ((points / 1024) << 16) & 0xFFFF0000;
+    ioctl(plaxi_file_, PLAXI_WRITE_RX_DATA_PARAM, &value);
+    ioctl(plaxi_file_, PLAXI_READ_RX_DATA_PARAM, &value);
+    printf("Reg.RegAddr = 0x1,Reg.RegValue = 0x%x\n", value);
+    usleep(10 * 1000);
+
+    //recv data;
+    //memcpy
+    std::string orxData = save_dec_data(points);
+    usleep(30 * 1000);
+
+    value = 0;
+    ioctl(plaxi_file_, PLAXI_WRITE_RX_DATA_PARAM, &value);
+    usleep(10 * 1000);
+    
+    return orxData;
+}
+
+void Talise::set_cals_channels(std::string const& channels)
+{
+    if(channels == "1")
+        write_reg(REG_RX0_DC_42, 1, 21, 20);
+    else if(channels == "2")
+        write_reg(REG_RX0_DC_42, 2, 21, 20);
+    else if(channels == "3")
+        write_reg(REG_RX0_DC_42, 0, 21, 20);
+}
+
+bool Talise::run_cals(uint32_t masks)
+{
+    uint32_t ret = BZ_runInitCals(&device_, masks);
+    ret |= BZ_waitInitCalsDone(&device_, 5000);
+    return ret == BZHAL_OK ? true: false; 
+}
+
+uint32_t Talise::cals_error_code()
+{
+    return BZ_getInitCalsStatus(&device_);
+}
+
+std::string Talise::cals_error_text(uint32_t error_code)
+{
+    return std::string();
+}
+
+bool Talise::setup_rx_agc(BzAgcCfg_t *cfg)
+{
+    uint32_t ret = BZ_setupRxAgc(&device_, cfg);
+    return ret == BZHAL_OK ? true: false;
+}
+
+void Talise::delay(uint32_t ms)
+{
+    usleep(ms * 1000);
+}
+
+void Talise::start_204b_sysc()
+{
+    uint32_t value = 0x14f4f;
+    ioctl(plaxi_file_, PLAXI_WRITE_204B_PARAM, &value);
+}
+void Talise::end_204b_sysc()
+{
+    uint32_t value = 0x4f4f;
+    ioctl(plaxi_file_, PLAXI_WRITE_204B_PARAM, &value);
+}
+
+bool Talise::jesd204b_state()
+{
+    uint32_t value;
+    ioctl(plaxi_file_, PLAXI_READ_204B_STATE, &value);
+    if(dev_id_ == 0)
+        return (value & 0xF) == 0xF;
+    return (value & 0xF0) == 0xF0;
+}
+
+void Talise::read_all()
+{
+    uint32_t value;
+    ioctl(plaxi_file_, PLAXI_READ_RX_DATA_PARAM, &value);
+    std::cout << "0x8000_0001 = 0x" << std::hex << value << std::endl;
+
+    ioctl(plaxi_file_, PLAXI_READ_TX_DATA_PARAM, &value);
+    std::cout << "0x8000_0002 = 0x" << std::hex << value << std::endl;
+
+    ioctl(plaxi_file_, PLAXI_READ_204B_PARAM, &value);
+    std::cout << "0x8000_0003 = 0x" << std::hex << value << std::endl;
+
+    ioctl(plaxi_file_, PLAXI_READ_IO_DIR_PARAM, &value);
+    std::cout << "0x8000_0004 = 0x" << std::hex << value << std::endl;
+
+    ioctl(plaxi_file_, PLAXI_READ_IOPAD_PARAM, &value);
+    std::cout << "0x8000_0005 = 0x" << std::hex << value << std::endl;
+
+    ioctl(plaxi_file_, PLAXI_FPGA_VERSION, &value);
+    std::cout << "0x8000_0006 = 0x" << std::hex << value << std::endl;
+
+    ioctl(plaxi_file_, PLAXI_READ_204B_STATE, &value);
+    std::cout << "0x8000_00E = 0x" << std::hex << value << std::endl;
+}
+
+void Talise::tx1_cali_enable(bool on)
+{
+    if(on)
+        BZHAL_TX1CaliOn(static_cast<bzHalHandle>(device_.devHalInfo));
+    else
+        BZHAL_TX1CaliOff(static_cast<bzHalHandle>(device_.devHalInfo));
+}
+
+void Talise::tx2_cali_enable(bool on)
+{
+    if(on)
+        BZHAL_TX2CaliOn(static_cast<bzHalHandle>(device_.devHalInfo));
+    else
+        BZHAL_TX2CaliOff(static_cast<bzHalHandle>(device_.devHalInfo));
+}
+
+void Talise::interruput_on()
+{
+    BZHAL_InterruptOn(static_cast<bzHalHandle>(device_.devHalInfo));
+}
+
+void Talise::trigger_out(bool on)
+{
+    uint32_t value = 0;
+    if(on)
+        value = 1;
+    ioctl(plaxi_file_, PLAXI_SET_TRIGGER_OUT, &value);
+}
+
+void Talise::lanpa_power(bool on)
+{
+    uint32_t value = 0;
+    if(on)
+        value = 1;
+    ioctl(plaxi_file_, PLAXI_SET_LANPA_PWR, &value);
+}
+
+std::string Talise::get_filepath(std::string const& filename)
+{
+    return std::string("/media/sd-mmcblk0p1/data/") + filename;
+}
+
+std::string Talise::get_rxfilename(uint32_t points, bool is_full)
+{
+    if(is_full)
+        return std::string("/media/sd-mmcblk0p1/www/data/RX_") + std::to_string(points) + ".dat";
+    else
+        return std::string("data/RX_") + std::to_string(points) + ".dat";
+}
+
+std::string Talise::get_orxfilename(uint32_t points, bool is_full)
+{
+    if(is_full)
+        return std::string("/media/sd-mmcblk0p1/www/data/ORX_") + std::to_string(points) + ".dat";
+    else
+        return std::string("data/ORX_") + std::to_string(points) + "dev_config.dat";
+}
+
+bool Talise::save_data_file(std::string const& filename, uint32_t points)
+{
+    int file = open(filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if(file < 0)
+    {
+        std::cerr << "cannot create file: " << filename << std::endl;
+        return false;
+    }
+
+    uint32_t*data =  (uint32_t*)rx_data;
+    for(uint32_t i = 0; i < points; i++)
+    {
+        write(file, (void *)data, sizeof(uint32_t));
+        data++;
+    }
+
+    close(file);
+    return true;
+}
+
+std::string Talise::save_hex_data(uint32_t points)
+{
+    uint32_t*data =  (uint32_t*)rx_data;
+    std::ostringstream os;
+    os << std::hex << std::uppercase;
+    for(uint32_t i = 0; i < points; i++)
+    {
+        os << std::setw(8) << std::setfill('0') << *data
+           << std::setw(0) << std::setfill(' ');
+        if((i + 1) % 16 == 0)
+            os << std::endl;
+        else 
+        {
+            if(i != points - 1)
+                os << " ";
+        }
+        data++;
+    }
+    return os.str();
+}
+
+std::string Talise::save_dec_data(uint32_t points)
+{
+    int16_t*data =  (int16_t*)rx_data;
+    uint32_t count = points * 2;
+    std::ostringstream os;
+    FILE *fp; 
+    fp = fopen("data.txt","w+");
+    for(uint32_t i = 0; i < count; i++)
+    {
+        int16_t v = *data;
+        os << (v / 4) << std::endl;
+        fprintf(fp,"%d\n",v/4);
+        std::cout<<(v / 4) << std::endl;
+        data++;
+    }
+    fclose(fp);
+    return os.str();
+}
+
+BzInit_t* Talise::dev_config()
+{
+    return dev_id_ == 0 ? &dev1_config_ : &dev2_config_;
+}
+
+void Talise::chip_select(int device_id)
+{
+    uint32_t value = 0;
+
+    if(device_id == 1)
+        value = 1;
+    ioctl(plaxi_file_, PLAXI_CHIP_SEL, &value);
+}
+bool Talise::cals(uint32_t bitmap)
+{
+    run_cals(bitmap);
+    return true;
+}
+
+bool Talise::init_device()
+{
+    //1.init 0
+    open_hardware();
+    reset_device();
+    get_boot_status();
+    load_firmware();
+    wait_firmware_ready();
+    load_config();
+    write_profile();
+    wait_profile_done();
+
+    //2.set pll
+    set_rf_freq();
+    wait_plls_lock_done();
+    set_aux_freq();
+    wait_plls_lock_done();
+    // dds on
+    tx_channel_ = BZ_TX1;
+    set_tx_power(10000,10000,2,2);
+    radio_on();
+
+    //3.cali
+    if(dev_id_ == 0)
+    {
+    //    run_cals(TX_LO_LEAKAGE_INTERNAL);
+    //   run_cals(TX_QEC_INIT);
+    }
+
+    //4.jesd204b
+    jesd204b_config();	
+    wait_jes204b_config_done();
+    //enable_tracking_cals();
+    
+    //5.sysref
+    enable_sysref_toframe();
+    
+    // dds on
+    tx_channel_ = BZ_TX1;
+    set_tx_power(10000,10000,2,2);
+
+    radio_on();
+    return true;
+}
+
+#define FUNCTION_CHECK(action) \
+    if(action == BZHAL_OK){ \
+        if(is_debug_) \
+            std::cout << __func__ << " is " << "OK!" << std::endl; \
+    } \
+    else{ \
+        if(is_debug_) \
+            std::cout << __func__ << " is " << "fail!" << std::endl; \
+    }
+
+#define FUNCTION_START \
+    if(is_debug_) \
+        std::cout << __func__ << " ..." << std::endl;
+
+bool Talise::open_hardware()
+{
+    uint32_t bzAction = BZ_openHw(&device_, dev_id_);
+    FUNCTION_CHECK(bzAction)
+    return bzAction == BZHAL_OK ? true : false;
+}
+
+bool Talise::reset_device()
+{
+    uint32_t bzAction = BZ_resetDevice(&device_);
+    FUNCTION_CHECK(bzAction)
+    return bzAction == BZHAL_OK ? true : false;
+}
+
+bool Talise::get_boot_status()
+{
+    FUNCTION_START
+    uint32_t bzAction = BZ_getBootStatus(&device_);
+    FUNCTION_CHECK(bzAction)
+    return bzAction == BZHAL_OK ? true : false;
+}
+
+bool Talise::load_firmware()
+{
+    uint32_t bzAction = BZ_loadFirmware(&device_);
+    FUNCTION_CHECK(bzAction)
+    return bzAction == BZHAL_OK ? true : false;
+}
+
+bool Talise::wait_firmware_ready()
+{
+    FUNCTION_START
+    uint32_t bzAction = BZ_waitFirmwareReady(&device_, 100);
+    FUNCTION_CHECK(bzAction)
+    return bzAction == BZHAL_OK ? true : false;
+}
+
+bool Talise::load_config()
+{
+    uint32_t bzAction = BZ_initialize(&device_, dev_config());
+    FUNCTION_CHECK(bzAction)
+    rx1_gain_index_ = dev_config()->rx.rxGainCtrl.rx1GainIndex;
+    rx2_gain_index_ = dev_config()->rx.rxGainCtrl.rx2GainIndex;
+    if(dev_config()->rx.rxGainCtrl.rxmgcMode == BZ_GPIOMODE)
+        gain_mode_ = "gpio";
+    else if(dev_config()->rx.rxGainCtrl.rxmgcMode == BZ_APIMODE)
+        gain_mode_ = "api";
+    tx_channel_ = dev_config()->tx.txChannels;
+    rx_channel_ = dev_config()->rx.rxChannels;
+    return bzAction == BZHAL_OK ? true : false;
+}
+
+bool Talise::write_profile()
+{
+    uint32_t bzAction = BZ_writeRiscvProfile(&device_, dev_config());
+    FUNCTION_CHECK(bzAction)
+    return bzAction == BZHAL_OK ? true : false;
+}
+
+bool Talise::wait_profile_done()
+{
+    FUNCTION_START
+    uint32_t bzAction = BZ_waitProfileDone(&device_, 100);
+    FUNCTION_CHECK(bzAction)
+    return bzAction == BZHAL_OK ? true : false;
+}
+
+bool Talise::set_rf_freq()
+{
+    uint32_t bzAction = BZ_setPllFrequency(&device_, BZ_RF_PLL,rf_freq);
+    FUNCTION_CHECK(bzAction)
+    return bzAction == BZHAL_OK ? true : false;
+}
+
+bool Talise::set_aux_freq()
+{
+    uint32_t bzAction = BZ_setPllFrequency(&device_, BZ_AUX_PLL,aux_freq);
+    FUNCTION_CHECK(bzAction)
+    return bzAction == BZHAL_OK ? true : false;
+}
+
+bool Talise::wait_plls_lock_done()
+{
+    FUNCTION_START
+    uint32_t bzAction = BZ_waitPllsLockDone(&device_, 5000);
+    FUNCTION_CHECK(bzAction)
+    return bzAction == BZHAL_OK ? true : false;
+}
+
+bool Talise::run_cals()
+{
+    uint32_t bzAction = BZ_runInitCals(&device_, DC_OFFSET);
+    FUNCTION_CHECK(bzAction)
+    return bzAction == BZHAL_OK ? true : false;
+}
+
+bool Talise::wait_cals_done()
+{
+    FUNCTION_START
+    uint32_t bzAction = BZ_waitInitCalsDone(&device_, 5000);
+    FUNCTION_CHECK(bzAction)
+    return bzAction == BZHAL_OK ? true : false;
+}
+
+bool Talise::jesd204b_config()
+{
+    uint32_t bzAction = BZ_writeJes204bConfig(&device_, dev_config());
+    FUNCTION_CHECK(bzAction)
+    return bzAction == BZHAL_OK ? true : false;
+}
+
+bool Talise::wait_jes204b_config_done()
+{
+    FUNCTION_START
+    uint32_t uiRet=0;
+    uint32_t bzAction = BZ_waitJes204bConfigDone(&device_, 100);
+    if(bzAction == BZHAL_OK)std::cout<<"BZ_waitJes204bConfigDone"<<std::endl;
+    bzAction = BZ_enableFramerLink(&device_, BZ_FRAMER_A, 0);
+    if(bzAction == BZHAL_OK)std::cout<<"BZ_enableFramerLink ok"<<std::endl;
+    bzAction = BZ_enableFramerLink(&device_, BZ_FRAMER_A, 1);
+    if(bzAction == BZHAL_OK)std::cout<<"BZ_enableFramerLink ok"<<std::endl;
+    bzAction = BZ_enableFramerLink(&device_, BZ_FRAMER_B, 0);
+    if(bzAction == BZHAL_OK)std::cout<<"BZ_enableFramerLink ok"<<std::endl;
+    bzAction = BZ_enableFramerLink(&device_, BZ_FRAMER_B, 1);
+    if(bzAction == BZHAL_OK)std::cout<<"BZ_enableFramerLink ok"<<std::endl;
+    bzAction = BZ_enableDeframerLink(&device_, BZ_DEFRAMER, 0);
+    if(bzAction == BZHAL_OK)std::cout<<"BZ_enableFramerLink ok"<<std::endl;
+    bzAction = BZ_enableDeframerLink(&device_, BZ_DEFRAMER, 1);
+    if(bzAction == BZHAL_OK)std::cout<<"BZ_enableFramerLink ok"<<std::endl;
+    FUNCTION_CHECK(bzAction)
+    BZ_getSyncStatus(&device_,&uiRet);
+    std::cout<<uiRet<<std::endl;
+    return bzAction == BZHAL_OK ? true : false;
+}
+
+bool Talise::enable_tracking_cals()
+{
+    uint32_t trackingCalMask =  TRACK_RX1_QEC |TRACK_RX2_QEC |
+    		TRACK_TX1_QEC |TRACK_TX2_QEC;
+    uint32_t bzAction = BZ_enableTrackingCals(&device_, trackingCalMask);
+    FUNCTION_CHECK(bzAction)
+    return bzAction == BZHAL_OK ? true : false;
+}
+bool Talise::enable_sysref_toframe()
+{
+    uint32_t bzAction = BZ_enableSysRefToFramer(&device_,dev_config());
+    FUNCTION_CHECK(bzAction)
+        return bzAction == BZHAL_OK ? true : false;
+}
+
+bool Talise::radio_on()
+{
+    int32_t bzAction = BZ_radioOn(&device_, mode_);
+    FUNCTION_CHECK(bzAction)
+    return bzAction == BZHAL_OK ? true : false;
+}
+
+bool Talise::radio_off()
+{
+    int32_t bzAction = BZ_radioOff(&device_, mode_);
+    FUNCTION_CHECK(bzAction)
+    return bzAction == BZHAL_OK ? true : false;
+}
+
+bool Talise::term_device()
+{
+    stop_tx_data();
+    if(device_.devHalInfo)
+    {
+        BZ_closeHw(&device_);
+        device_ = {};
+    }
+    return true;
+}
+
+bool Talise::set_rx_gain_ctrl_pin(int decStep, int incStep)
+{
+    BzRxGainCtrlPin_t rxGainCtrlPin;
+    rxGainCtrlPin.decStep = decStep;
+    rxGainCtrlPin.incStep = incStep;
+    if(BZ_RX1 == rx_channel_)
+    {
+        rxGainCtrlPin.rx1GainCtrlPinInfo.rxGainIncPin = BZ_GPIO_08;
+        rxGainCtrlPin.rx1GainCtrlPinInfo.rxGainDecPin = BZ_GPIO_09;
+        rxGainCtrlPin.rx1GainCtrlPinInfo.rxGainIncPinFunc = BZ_SEL_1;
+        rxGainCtrlPin.rx1GainCtrlPinInfo.rxGainDecPinFunc = BZ_SEL_1;
+    }
+    else if(BZ_RX2 == rx_channel_)
+    {
+        rxGainCtrlPin.rx2GainCtrlPinInfo.rxGainIncPin = BZ_GPIO_10;
+        rxGainCtrlPin.rx2GainCtrlPinInfo.rxGainDecPin = BZ_GPIO_11;   
+        rxGainCtrlPin.rx2GainCtrlPinInfo.rxGainIncPinFunc = BZ_SEL_1;  
+        rxGainCtrlPin.rx2GainCtrlPinInfo.rxGainDecPinFunc = BZ_SEL_1;  
+    }
+    else if(BZ_RX1RX2 == rx_channel_)
+    {
+        rxGainCtrlPin.rx1GainCtrlPinInfo.rxGainIncPin = BZ_GPIO_08;
+        rxGainCtrlPin.rx1GainCtrlPinInfo.rxGainDecPin = BZ_GPIO_09;
+        rxGainCtrlPin.rx1GainCtrlPinInfo.rxGainIncPinFunc = BZ_SEL_1;
+        rxGainCtrlPin.rx1GainCtrlPinInfo.rxGainDecPinFunc = BZ_SEL_1;
+        rxGainCtrlPin.rx2GainCtrlPinInfo.rxGainIncPin = BZ_GPIO_10;
+        rxGainCtrlPin.rx2GainCtrlPinInfo.rxGainDecPin = BZ_GPIO_11;
+        rxGainCtrlPin.rx2GainCtrlPinInfo.rxGainIncPinFunc = BZ_SEL_1;  
+        rxGainCtrlPin.rx2GainCtrlPinInfo.rxGainDecPinFunc = BZ_SEL_1;  
+    }
+    uint32_t bzAction = BZ_setRxGainCtrlPin(&device_, rx_channel_, &rxGainCtrlPin);
+    return bzAction == BZHAL_OK ? true : false;
+}
+
+bool Talise::set_gio_dir(bool is_out)
+{
+    uint32_t value = 0;
+    ioctl(plaxi_file_, PLAXI_READ_IO_DIR_PARAM, &value);
+    if(is_out)
+        value |= 0xF00;
+    else
+        value &= 0xFFFFF0FF;
+    ioctl(plaxi_file_, PLAXI_WRITE_IO_DIR_PARAM, &value);
+    return true;
+}
+
+bool Talise::rx1_gain(bool add)
+{
+    uint32_t value = 0;
+    
+    ioctl(plaxi_file_, PLAXI_READ_IOPAD_PARAM, &value);
+    if(add)
+    {
+        if(rx1_gain_index_ + 1 > 127)
+            return false;
+        rx1_gain_index_++;
+        value |= (1 << 24);
+    }
+    else
+    {
+        if(rx1_gain_index_ - 1 < 0)
+            return false;
+        rx1_gain_index_--;
+        value |= (1 << 25);
+    }
+    ioctl(plaxi_file_, PLAXI_WRITE_IOPAD_PARAM, &value);
+
+    //usleep(1000);
+
+    if(add)
+        value &= static_cast<uint32_t>(~(1 << 24));
+    else
+        value &= static_cast<uint32_t>(~(1 << 25));
+
+    ioctl(plaxi_file_, PLAXI_WRITE_IOPAD_PARAM, &value);
+
+    return true;
+}
+
+bool Talise::rx2_gain(bool add)
+{
+    uint32_t value = 0;
+
+    ioctl(plaxi_file_, PLAXI_READ_IOPAD_PARAM, &value);
+    if(add)
+    {
+        if(rx2_gain_index_ + 1 > 127)
+            return false;
+        rx2_gain_index_++;
+        value |= (1 << 26);
+    }
+    else
+    {
+        if(rx2_gain_index_ - 1 < 0)
+            return false;
+        rx2_gain_index_--;
+        value |= (1 << 27);
+    }
+    ioctl(plaxi_file_, PLAXI_WRITE_IOPAD_PARAM, &value);
+
+    //usleep(1000);
+
+    if(add)
+        value &= static_cast<uint32_t>(~(1 << 26));
+    else
+        value &= static_cast<uint32_t>(~(1 << 27));
+    ioctl(plaxi_file_, PLAXI_WRITE_IOPAD_PARAM, &value);
+    return true;
+}
+
+int32_t Talise::rx_gain_index()
+{
+    if(rx_channel_ == BZ_RX1)
+        return rx1_gain_index_;
+    else
+        return rx2_gain_index_;
+}
+
+bool Talise::set_rx_gain_control_mode(bool is_apimode)
+{
+    BzCtrlWay mode = BZ_GPIOMODE;
+    if(!is_apimode)
+        gain_mode_ = "gpio";
+    else
+    {
+        mode = BZ_APIMODE;
+        gain_mode_ = "api";
+    }
+
+    uint32_t bzAction =  BZ_setRxGainControlMode(&device_, BZ_MGC, mode);
+    return bzAction == BZHAL_OK ? true : false;
+}
+
+bool Talise::set_204b_sysref(bool on)
+{
+    BzJes204bSysrefControlMode mode = BZ_JES204B_SYSREF_OFF;
+    if(on)
+        mode = BZ_JES204B_SYSREF_ON;
+
+    uint32_t bzAction = BZ_Jes204bSysrefControl(&device_, mode);
+    return bzAction == BZHAL_OK ? true : false;
+}
+
+bool Talise::set_dds_off()
+{
+    uint32_t bzAction =  BZ_setDdsOff(&device_);
+    return bzAction == BZHAL_OK ? true : false;
+}
+
+bool Talise::write_fpga_reg(int offset, uint32_t value)
+{
+    unsigned long int offsets[] = { 
+        0, 
+        PLAXI_WRITE_RX_DATA_PARAM, // 1
+        PLAXI_WRITE_TX_DATA_PARAM, // 2
+        PLAXI_WRITE_204B_PARAM,    // 3
+        PLAXI_WRITE_IO_DIR_PARAM,  // 4
+        PLAXI_WRITE_IOPAD_PARAM    // 5
+    };
+
+    if(offset < 1 || offset > 5)
+        return false;
+        
+    ioctl(plaxi_file_, offsets[offset], &value);
+    return true;
+}
+
+bool Talise::read_fpga_reg(int offset, uint32_t& value)
+{
+    unsigned long int offsets[] = { 
+        0, 
+        PLAXI_READ_RX_DATA_PARAM, // 1
+        PLAXI_READ_TX_DATA_PARAM, // 2
+        PLAXI_READ_204B_PARAM,    // 3
+        PLAXI_READ_IO_DIR_PARAM,  // 4
+        PLAXI_READ_IOPAD_PARAM    // 5
+    };
+
+    if(offset < 1 || offset > 5)
+        return false;
+    ioctl(plaxi_file_, offsets[offset], &value);
+    return true;
+}
+
+bool Talise::rx_slicer_enable()
+{
+    uint32_t bzAction =  BZ_setRxSlicerEnable(&device_, BZ_RX1, &(dev_config()->rx.rxSlicerPinInfo));
+    bzAction =  BZ_setRxSlicerEnable(&device_, BZ_RX2, &(dev_config()->rx.rxSlicerPinInfo));
+    return bzAction == BZHAL_OK ? true : false;
+}
+
+bool Talise::tx1_enable(bool on)
+{
+    uint32_t bzAction =  BZ_Tx1EnableCtrl(&device_, 
+        on ? BZHAL_CHANNEL_ENABLE : BZHAL_CHANNEL_DISABLE);
+    return bzAction == BZHAL_OK ? true : false;
+}
+
+bool Talise::tx2_enable(bool on)
+{
+    uint32_t bzAction =  BZ_Tx2EnableCtrl(&device_, 
+        on ? BZHAL_CHANNEL_ENABLE : BZHAL_CHANNEL_DISABLE);
+    return bzAction == BZHAL_OK ? true : false;
+}
+
+bool Talise::rx1_enable(bool on)
+{
+    uint32_t bzAction =  BZ_Rx1EnableCtrl(&device_, 
+        on ? BZHAL_CHANNEL_ENABLE : BZHAL_CHANNEL_DISABLE);
+    return bzAction == BZHAL_OK ? true : false;
+}
+
+bool Talise::rx2_enable(bool on)
+{
+    uint32_t bzAction =  BZ_Rx2EnableCtrl(&device_, 
+        on ? BZHAL_CHANNEL_ENABLE : BZHAL_CHANNEL_DISABLE);
+    return bzAction == BZHAL_OK ? true : false;
+}
+
+bool Talise::orx1_enable(bool on)
+{
+    uint32_t bzAction =  BZ_ORx1EnableCtrl(&device_, 
+        on ? BZHAL_CHANNEL_ENABLE : BZHAL_CHANNEL_DISABLE);
+    //start test
+    uint32_t data;
+    read_reg(0x1c6, data);
+    data &= (~(1 << 15));
+    write_reg(0x1c6, data);
+    //end test
+    return bzAction == BZHAL_OK ? true : false;
+}
+
+bool Talise::orx2_enable(bool on)
+{
+    uint32_t bzAction =  BZ_ORx2EnableCtrl(&device_, 
+        on ? BZHAL_CHANNEL_ENABLE : BZHAL_CHANNEL_DISABLE);
+    //start test
+    uint32_t data;
+    read_reg(0x1c6, data);
+    data |= (1 << 15);
+    write_reg(0x1c6, data);
+    //end test
+    return bzAction == BZHAL_OK ? true : false;
+}

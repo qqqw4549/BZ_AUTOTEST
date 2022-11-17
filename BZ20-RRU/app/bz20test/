@@ -1,0 +1,82 @@
+#include "jesd204btest.h"
+#include "bz_talise.h"
+#include "command.h"
+#include "bz_jesd204b_types.h"
+
+#include <unistd.h>
+#include <stdio.h>
+
+#define JESD204B_WAIT_MAX_COUNT 10
+#define JESD204B_WAIT_TIME 1000000 //1s
+
+static void init_device(uint32_t device_id)
+{
+    open_device(device_id);
+    rest_device();
+    wait_boot_status();
+    load_firmware();
+    wait_firmware_ready();
+    load_config();
+    write_profile();
+    wait_profile_done();
+}
+
+static void set_freq(uint64_t rf_freq_hz, uint64_t aux_freq_hz)
+{
+
+    set_rf_pll_freq(rf_freq_hz);
+    wait_pll_lock_done();
+    set_aux_pll_freq(aux_freq_hz);
+    wait_pll_lock_done();
+}
+
+
+
+static void set_jest204b()
+{
+    BzTxConfig_t [] stArrayTXCfg = {
+        {
+        .lid = 1;
+        .subClass = 1;
+        .cf = 0;
+        .cs = 0;
+        .f  = 0;
+        .k  = 0;
+        }
+    }; 
+    BzRxOrXConfig_t stArrayRXCfg = {
+       .lid = 1;
+       .subClass = 1;
+       .cf = 0;
+       .cs = 0;
+       .f  = 0;
+       .k  = 0; 
+    } 
+    start_204b_sysc();
+    jesd204b_cfgchange(&B20Init,stArrayTXCfg[0],stArrayRXCfg[0]);
+    jesd204b_config();
+    
+    wait_jesd204b_config();
+    {
+        int i;
+        for(i = 0; i < JESD204B_WAIT_MAX_COUNT; i++)
+        {
+            if(jesd204b_sysc_is_ok())
+            {
+                printf("204B sync is OK\n");
+                break;
+            }
+            usleep(JESD204B_WAIT_TIME);
+        }
+        if(i==JESD204B_WAIT_MAX_COUNT)printf("204B sync fail\n");
+    }
+    end_204b_sysc();
+}
+
+void jesd204b_test(void)
+{
+    RegisterCommand("init", "init bz20 device", (void *)init_device);
+    RegisterCommand("term", "term bz20 device", (void *)close_device);
+    RegisterCommand("setfreq", "setfreq rf_freq_hz  aux_freq_hz", (void *)set_freq);
+    RegisterCommand("set204b", "config 204b", (void *)set_jest204b);
+}

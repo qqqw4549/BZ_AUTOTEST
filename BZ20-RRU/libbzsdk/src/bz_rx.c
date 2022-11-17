@@ -1,0 +1,523 @@
+/**
+* \file bz_rx.c
+* \brief Contains functions to support B20 Rx and Observation Rx data path
+*        control
+* \version: Ver 1.0
+* \author :
+* \date   : 2021/11/15 18:17
+*
+* Copyright 2021- Zealync Inc.
+*/
+#include "bz_rx.h"
+#include "bz_radio.h"
+#include "bz_error.h"
+#include "bz_plat_hal.h"
+#include "bz_reg_dig.h"
+#include "bz_reg_ana.h"
+#include "bz_gpio.h"
+#include "bz_riscv.h"
+
+static uint32_t bz_setRxGainCtrlPin (BzDevice_t *hw_priv, BzRxGainCtrlPinInfo_t *rxGainCtrlPinInfo)
+{
+	BzRecoveryActions_t bzRetAct=BZ_NO_ACTION;
+	/*gpioOutEn -->1 output*/
+	/*gpioOutEn -->0 input*/
+	uint32_t gpioOutEn=0;
+	/*gpioCtrl -->1 Ctrl by spi*/
+	/*gpioCtrl -->0 Ctrl by riscv*/
+	uint32_t gpioCtrl=1;
+
+	if((rxGainCtrlPinInfo->rxGainIncPin >= BZ_GPIO_00)&&(rxGainCtrlPinInfo->rxGainIncPin <= BZ_GPIO_09))
+	{
+		bzRetAct=BZ_setGpioSourceCtrl(hw_priv,gpioCtrl,rxGainCtrlPinInfo->rxGainIncPin);
+		IF_ERR_RETURN(bzRetAct);	
+	}
+	
+	bzRetAct=BZ_setGpioDirection(hw_priv,gpioOutEn,rxGainCtrlPinInfo->rxGainIncPin);
+	IF_ERR_RETURN(bzRetAct);
+	
+	bzRetAct=BZ_setGpioFuncSel(hw_priv,rxGainCtrlPinInfo->rxGainIncPinFunc,rxGainCtrlPinInfo->rxGainIncPin);
+	IF_ERR_RETURN(bzRetAct);
+	
+	if((rxGainCtrlPinInfo->rxGainIncPin >= BZ_GPIO_00)&&(rxGainCtrlPinInfo->rxGainIncPin <= BZ_GPIO_09))
+	{
+		bzRetAct=BZ_setGpioSourceCtrl(hw_priv,gpioCtrl,rxGainCtrlPinInfo->rxGainDecPin);
+		IF_ERR_RETURN(bzRetAct);	
+	}
+	
+	bzRetAct=BZ_setGpioDirection(hw_priv,gpioOutEn,rxGainCtrlPinInfo->rxGainDecPin);
+	IF_ERR_RETURN(bzRetAct);
+	
+	bzRetAct=BZ_setGpioFuncSel(hw_priv,rxGainCtrlPinInfo->rxGainDecPinFunc,rxGainCtrlPinInfo->rxGainDecPin);
+	IF_ERR_RETURN(bzRetAct);
+	
+	return (uint32_t)bzRetAct;	
+}
+uint32_t  BZ_setRxGainCtrlPin(BzDevice_t *hw_priv, BzRxChannels_t rxChannel, BzRxGainCtrlPin_t *rxGainCtrlPin)
+{
+	BzRecoveryActions_t bzRetAct=BZ_NO_ACTION;	
+	bzHalErr halstatus=BZHAL_OK;
+	uint32_t MAX_STEP =0x7;
+
+	switch(rxChannel){
+		case BZ_RX1:
+            bzRetAct = bz_setRxGainCtrlPin(hw_priv, &rxGainCtrlPin->rx1GainCtrlPinInfo);
+            IF_ERR_RETURN(bzRetAct);
+			break;
+		case BZ_RX2:          
+            bzRetAct = bz_setRxGainCtrlPin(hw_priv, &rxGainCtrlPin->rx2GainCtrlPinInfo);
+            IF_ERR_RETURN(bzRetAct);
+			break;
+		case BZ_RX1RX2:    
+			bzRetAct = bz_setRxGainCtrlPin(hw_priv, &rxGainCtrlPin->rx1GainCtrlPinInfo);
+            IF_ERR_RETURN(bzRetAct);
+            bzRetAct = bz_setRxGainCtrlPin(hw_priv, &rxGainCtrlPin->rx2GainCtrlPinInfo);
+            IF_ERR_RETURN(bzRetAct);
+			break;			
+		default:
+			break;
+	}
+	/*Error check for gain index*/
+	if(rxGainCtrlPin->decStep >MAX_STEP)
+	{
+		return (uint32_t)BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,
+				BZ_ERR_RX_GAINPIN_CTRL_VALID,bzRetAct,BZ_ERR_CHECK_PARAM);
+
+	}
+	if(rxGainCtrlPin->incStep>MAX_STEP){
+
+		return (uint32_t)BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,
+				BZ_ERR_RX_GAINPIN_CTRL_VALID,bzRetAct,BZ_ERR_CHECK_PARAM);
+
+	}
+	
+	halstatus = BZ_spiWriteField(hw_priv,REG_GC_02,(rxGainCtrlPin->decStep-1),11,8);
+	halstatus = BZ_spiWriteField(hw_priv,REG_GC_02,(rxGainCtrlPin->incStep-1),15,12);
+	bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,halstatus,bzRetAct,BZ_ERR_RESET_SPI);
+	IF_ERR_RETURN(bzRetAct);
+	
+	return (uint32_t)bzRetAct;	
+}
+
+
+uint32_t BZ_setRxManualGain(BzDevice_t *hw_priv, BzRxChannels_t rxChannel, uint8_t gainIndex)
+{
+	BzRecoveryActions_t bzRetAct=BZ_NO_ACTION;
+	bzHalErr halError=BZHAL_OK;
+	
+    if (rxChannel == BZ_RX1)
+    {
+        if ((gainIndex < hw_priv->BzState.gainIndexes.rx1MinGainIndex) ||
+            (gainIndex > hw_priv->BzState.gainIndexes.rx1MaxGainIndex))
+        {
+			return (uint32_t)BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,
+					BZ_ERR_RX1_MAX_GAIN_VALID,bzRetAct,BZ_ERR_CHECK_PARAM);
+        }
+    }
+    else if (rxChannel == BZ_RX2)
+    {
+        if ((gainIndex < hw_priv->BzState.gainIndexes.rx2MinGainIndex) ||
+            (gainIndex > hw_priv->BzState.gainIndexes.rx2MaxGainIndex))
+        {
+			return (uint32_t)BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,
+					BZ_ERR_RX2_MAX_GAIN_VALID,bzRetAct,BZ_ERR_CHECK_PARAM);
+        }
+    }
+    else
+    {
+		return (uint32_t)BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,
+				BZ_ERR_TXRXORX_CHANNLE,bzRetAct,BZ_ERR_CHECK_PARAM);
+    }
+
+    if (rxChannel == BZ_RX1)
+    {
+        halError = BZ_spiWriteField(hw_priv, REG_GC_02,1,24,24);
+	    bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,halError,bzRetAct,BZ_ERR_RESET_SPI);
+		IF_ERR_RETURN(bzRetAct);
+
+		halError = BZ_spiWriteField(hw_priv, REG_GC_02,gainIndex,6,0);
+	    bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,halError,bzRetAct,BZ_ERR_RESET_SPI);
+		IF_ERR_RETURN(bzRetAct);
+    }
+    else
+    {
+        halError = BZ_spiWriteField(hw_priv, REG_GC_02,1,25,25);
+	    bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,halError,bzRetAct,BZ_ERR_RESET_SPI);
+		IF_ERR_RETURN(bzRetAct);
+		
+		halError = BZ_spiWriteField(hw_priv, REG_GC_02,gainIndex,23,17);
+	    bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,halError,bzRetAct,BZ_ERR_RESET_SPI);
+		IF_ERR_RETURN(bzRetAct);
+    }	
+	
+	return (uint32_t)bzRetAct;	
+}
+
+uint32_t BZ_getRxGain(BzDevice_t *hw_priv,BzRxChannels_t rxChannel, uint32_t *rxGainIndex)
+{
+	BzRecoveryActions_t bzRetAct=BZ_NO_ACTION;
+	bzHalErr halError=BZHAL_OK;
+
+	switch(rxChannel){
+		case BZ_RX1:
+			halError = BZ_spiReadField(hw_priv, REGOUT_GC_21,rxGainIndex,6,0);
+			bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,halError,bzRetAct,BZ_ERR_RESET_SPI);
+			IF_ERR_RETURN(bzRetAct);
+			break;
+		case BZ_RX2:
+			halError = BZ_spiReadField(hw_priv, REGOUT_GC_21,rxGainIndex,14,8);
+			bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,halError,bzRetAct,BZ_ERR_RESET_SPI);
+			IF_ERR_RETURN(bzRetAct);
+			break;
+		default:
+			return (uint32_t)BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,
+					BZ_ERR_TXRXORX_CHANNLE,bzRetAct,BZ_ERR_CHECK_PARAM);
+
+	}
+	return (uint32_t)bzRetAct;	
+}
+uint32_t BZ_setRxGainControlMode(BzDevice_t *hw_priv, BzGainMode_t mode,BzCtrlWay ctrlWay)
+{
+	BzRecoveryActions_t bzRetAct=BZ_NO_ACTION;
+	bzHalErr halError=BZHAL_OK;
+
+	halError = BZ_spiWriteField(hw_priv,REG_GC_01,mode,0,0);	
+	bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,halError,bzRetAct,BZ_ERR_RESET_SPI);
+	IF_ERR_RETURN(bzRetAct);
+	
+	/*0: API mode; index is from register   
+	 1: Pin ctrl mode; index is controlled by GPIO*/
+	halError = BZ_spiWriteField(hw_priv,REG_GC_02,ctrlWay,16,16);
+	bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,halError,bzRetAct,BZ_ERR_RESET_SPI);
+	IF_ERR_RETURN(bzRetAct);
+	
+	return (uint32_t)bzRetAct;	
+}
+uint32_t  BZ_setObsRxGainCtrlPin(BzDevice_t *hw_priv, BzObsRxChannels_t orxChannel, BzRxGainCtrlPin_t *rxGainCtrlPin)
+{
+	BzRecoveryActions_t bzRetAct=BZ_NO_ACTION;	
+	bzHalErr halstatus=BZHAL_OK;
+	uint32_t MAX_STEP =0x7;
+	
+	switch(orxChannel){
+		case BZ_ORX1:
+            bzRetAct = bz_setRxGainCtrlPin(hw_priv, &rxGainCtrlPin->rx1GainCtrlPinInfo);
+            IF_ERR_RETURN(bzRetAct);
+			break;
+		case BZ_ORX2:          
+            bzRetAct = bz_setRxGainCtrlPin(hw_priv, &rxGainCtrlPin->rx2GainCtrlPinInfo);
+            IF_ERR_RETURN(bzRetAct);
+			break;
+		case BZ_ORX1ORX2:    
+			bzRetAct = bz_setRxGainCtrlPin(hw_priv, &rxGainCtrlPin->rx1GainCtrlPinInfo);
+            IF_ERR_RETURN(bzRetAct);
+            bzRetAct = bz_setRxGainCtrlPin(hw_priv, &rxGainCtrlPin->rx2GainCtrlPinInfo);
+            IF_ERR_RETURN(bzRetAct);
+			break;			
+		default:
+			break;
+	}
+
+	/*Error check for gain index*/
+	if(rxGainCtrlPin->decStep >MAX_STEP)
+	{
+		return (uint32_t)BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,
+				BZ_ERR_RX_GAINPIN_CTRL_VALID,bzRetAct,BZ_ERR_CHECK_PARAM);
+
+	}
+	if(rxGainCtrlPin->incStep>MAX_STEP){
+
+		return (uint32_t)BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,
+				BZ_ERR_RX_GAINPIN_CTRL_VALID,bzRetAct,BZ_ERR_CHECK_PARAM);
+
+	}
+
+	halstatus = BZ_spiWriteField(hw_priv,REG_GC_04,(rxGainCtrlPin->decStep-1),11,8);
+	halstatus = BZ_spiWriteField(hw_priv,REG_GC_04,(rxGainCtrlPin->incStep-1),15,12);	
+	
+	bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,halstatus,bzRetAct,BZ_ERR_RESET_SPI);
+	IF_ERR_RETURN(bzRetAct);
+	
+	return (uint32_t)bzRetAct;	
+}
+
+uint32_t BZ_setObsRxManualGain(BzDevice_t *hw_priv,BzObsRxChannels_t obsRxCh, uint8_t gainIndex)
+{
+	BzRecoveryActions_t bzRetAct=BZ_NO_ACTION;
+	bzHalErr halError=BZHAL_OK;
+	
+    switch(obsRxCh)
+    {
+        case BZ_ORX1:
+            if ((gainIndex < hw_priv->BzState.gainIndexes.orx1MinGainIndex) ||
+                (gainIndex > hw_priv->BzState.gainIndexes.orx1MaxGainIndex))
+            {
+				return (uint32_t)BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,
+						BZ_ERR_ORX1_MAX_GAIN_VALID,bzRetAct,BZ_ERR_CHECK_PARAM);
+            }
+            break;
+        case BZ_ORX2:
+            if ((gainIndex < hw_priv->BzState.gainIndexes.orx2MinGainIndex) ||
+                (gainIndex > hw_priv->BzState.gainIndexes.orx2MaxGainIndex))
+            {
+				return (uint32_t)BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,
+						BZ_ERR_ORX2_MAX_GAIN_VALID,bzRetAct,BZ_ERR_CHECK_PARAM);
+            }
+			break;
+		default:
+            break;
+    }
+
+    if(obsRxCh == BZ_ORX1)
+    {
+        halError = BZ_spiWriteField(hw_priv, REG_GC_04,1,24,24);
+        bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,halError,bzRetAct,BZ_ERR_RESET_SPI);
+		IF_ERR_RETURN(bzRetAct);
+		
+		halError = BZ_spiWriteField(hw_priv, REG_GC_04,gainIndex,6,0);
+        bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,halError,bzRetAct,BZ_ERR_RESET_SPI);
+		IF_ERR_RETURN(bzRetAct);
+    }
+
+    if(obsRxCh == BZ_ORX2)
+    {
+        halError = BZ_spiWriteField(hw_priv, REG_GC_04,1,25,25);
+        bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,halError,bzRetAct,BZ_ERR_RESET_SPI);
+		IF_ERR_RETURN(bzRetAct);
+		
+		halError = BZ_spiWriteField(hw_priv, REG_GC_04,gainIndex,23,17);
+        bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,halError,bzRetAct,BZ_ERR_RESET_SPI);
+		IF_ERR_RETURN(bzRetAct);
+    }	
+	
+	return (uint32_t)bzRetAct;	
+}
+
+uint32_t BZ_getObsRxGain(BzDevice_t *hw_priv,BzObsRxChannels_t obsRxChannel, uint32_t *obsRxGainIndex)
+{
+	BzRecoveryActions_t bzRetAct=BZ_NO_ACTION;
+	bzHalErr halError=BZHAL_OK;	
+
+	switch(obsRxChannel){
+		case BZ_ORX1:
+			halError = BZ_spiReadField(hw_priv,REGOUT_GC_21,obsRxGainIndex,22,16);
+			bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,halError,bzRetAct,BZ_ERR_RESET_SPI);
+			IF_ERR_RETURN(bzRetAct);
+			break;
+		case BZ_ORX2:
+			halError = BZ_spiReadField(hw_priv,REGOUT_GC_21,obsRxGainIndex,30,24);
+			bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,halError,bzRetAct,BZ_ERR_RESET_SPI);
+			IF_ERR_RETURN(bzRetAct);
+			break;
+		default:
+			return (uint32_t)BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,
+					BZ_ERR_TXRXORX_CHANNLE,bzRetAct,BZ_ERR_CHECK_PARAM);
+	}
+	return (uint32_t)bzRetAct;	
+}
+uint32_t BZ_setObsRxGainControlMode(BzDevice_t *hw_priv, BzGainMode_t mode,BzCtrlWay ctrlWay)
+{
+	BzRecoveryActions_t bzRetAct=BZ_NO_ACTION;
+	bzHalErr halError=BZHAL_OK;
+
+	halError = BZ_spiWriteField(hw_priv,REG_GC_03,mode,0,0);
+	bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,halError,bzRetAct,BZ_ERR_RESET_SPI);
+	IF_ERR_RETURN(bzRetAct);
+
+	/*0: API mode; index is from register   
+	 1: Pin ctrl mode; index is controlled by GPIO*/
+	halError = BZ_spiWriteField(hw_priv,REG_GC_04,ctrlWay,16,16);
+	bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,halError,bzRetAct,BZ_ERR_RESET_SPI);
+	IF_ERR_RETURN(bzRetAct);
+	
+	return (uint32_t)bzRetAct;	
+}
+
+uint32_t BZ_getObsRxGainControlMode(BzDevice_t *hw_priv, BzGainMode_t *mode,BzCtrlWay *ctrlWay)
+{
+	BzRecoveryActions_t bzRetAct=BZ_NO_ACTION;
+	bzHalErr halError=BZHAL_OK;
+
+	halError = BZ_spiReadField(hw_priv,REG_GC_03,mode,0,0);
+	bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,halError,bzRetAct,BZ_ERR_RESET_SPI);
+	IF_ERR_RETURN(bzRetAct);
+
+	/*0: API mode; index is from register   
+	 1: Pin ctrl mode; index is controlled by GPIO*/
+	halError = BZ_spiReadField(hw_priv,REG_GC_04,ctrlWay,16,16);
+	bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,halError,bzRetAct,BZ_ERR_RESET_SPI);
+	IF_ERR_RETURN(bzRetAct);
+	
+	return (uint32_t)bzRetAct;	
+}
+
+
+/*!< GPIO Select :{monitor_valid_data[7:0], 8d0}*/ 
+static uint32_t BZ_setGpioFunForSlicerPosSel(BzDevice_t *hw_priv, BzGpioPinSel_t GpioNum,BzGpioPinFunc_t GpioFunc)
+{	
+	BzRecoveryActions_t bzRetAct=BZ_NO_ACTION;
+	
+	bzRetAct=BZ_setGpioSourceCtrl(hw_priv, BZ_SPI_CTRL,GpioNum);
+	IF_ERR_RETURN(bzRetAct);
+	
+	bzRetAct=BZ_setGpioDirection(hw_priv, BZ_GPIO_DIR_OUT,GpioNum);
+	IF_ERR_RETURN(bzRetAct);
+	
+	bzRetAct=BZ_setGpioFuncSel(hw_priv, BZ_SEL_3,GpioNum);
+	IF_ERR_RETURN(bzRetAct);
+	
+    return (uint32_t)bzRetAct;	
+}
+
+uint32_t BZ_setRxSlicerEnable(BzDevice_t *hw_priv,BzRxChannels_t rxChannel,BzRxSlicerPin_t *rxSlierPin)
+{
+	BzRecoveryActions_t bzRetAct=BZ_NO_ACTION;
+	
+	BzData DataInfo;
+	BzCmdTx *pMsg;
+	
+	bzHalErr halError=BZHAL_OK;
+	
+	BZ_Memset(&DataInfo,0,sizeof(BzData));
+	pMsg=&DataInfo.u.Tx;
+	
+	DataInfo.CmdType=0xff;
+	pMsg->Cmd=BZ_SET_OPCODE;
+	
+	switch(rxChannel){
+		
+		case BZ_RX1:
+			bzRetAct=BZ_setGpioFunForSlicerPosSel(hw_priv,rxSlierPin->rx1SlicerPinInfo.rx1SlicerPin_0,rxSlierPin->rxSlicerPinFunc);
+			IF_ERR_RETURN(bzRetAct);
+			
+			bzRetAct=BZ_setGpioFunForSlicerPosSel(hw_priv,rxSlierPin->rx1SlicerPinInfo.rx1SlicerPin_1,rxSlierPin->rxSlicerPinFunc);
+			IF_ERR_RETURN(bzRetAct);
+			
+			bzRetAct=BZ_setGpioFunForSlicerPosSel(hw_priv,rxSlierPin->rx1SlicerPinInfo.rx1SlicerPin_2,rxSlierPin->rxSlicerPinFunc);
+			IF_ERR_RETURN(bzRetAct);
+			break;
+		case BZ_RX2:
+			bzRetAct=BZ_setGpioFunForSlicerPosSel(hw_priv,rxSlierPin->rx2SlicerPinInfo.rx2SlicerPin_0,rxSlierPin->rxSlicerPinFunc);
+			IF_ERR_RETURN(bzRetAct);
+			
+			bzRetAct=BZ_setGpioFunForSlicerPosSel(hw_priv,rxSlierPin->rx2SlicerPinInfo.rx2SlicerPin_1,rxSlierPin->rxSlicerPinFunc);
+			IF_ERR_RETURN(bzRetAct);
+			
+			bzRetAct=BZ_setGpioFunForSlicerPosSel(hw_priv,rxSlierPin->rx2SlicerPinInfo.rx2SlicerPin_2,rxSlierPin->rxSlicerPinFunc);
+			IF_ERR_RETURN(bzRetAct);
+			break;
+			default:
+				break;
+	}
+
+	if(rxSlierPin->EnableSlicer == BZ_RXSLICER_EN){
+		
+		/*Send cmd to riscv change gaintable to normal digital gain mode*/
+		DataInfo.u.Tx.TxData.value=(HI_ENABLE_SLICER|(BZ_RXSLICER_EN<<16));
+		BZ_spiWriteField(hw_priv,REG_J_SEL_1,2,17,16);
+
+	}else{
+		/*Send cmd to riscv change gaintable to normal slicer gain mode*/
+		DataInfo.u.Tx.TxData.value=(HI_ENABLE_SLICER|(BZ_RXSLICER_DIS<<16));
+		BZ_spiWriteField(hw_priv,REG_J_SEL_1,0,17,16);
+	}
+	bzRetAct=BZ_sendRiscvCmd(hw_priv,(void*)&DataInfo,IOCTL_WRITE_CMD);
+	IF_ERR_RETURN(bzRetAct);
+
+	/*Enable gain table*/
+	halError = BZ_spiWriteField(hw_priv,REG_GC_00,0x1,16,16);
+	bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,halError,bzRetAct,BZ_ERR_RESET_SPI);
+	IF_ERR_RETURN(bzRetAct);
+
+    return (uint32_t)bzRetAct;	
+
+}
+uint32_t BZ_setORxPinFunction(BzDevice_t *hw_priv,BzObsRxChannels_t obsRxChannel)
+{
+	BzRecoveryActions_t bzRetAct=BZ_NO_ACTION;
+
+	switch(obsRxChannel){
+		case BZ_ORX1:
+			bzRetAct=BZ_setGpioSourceCtrl(hw_priv, BZ_SPI_CTRL, BZ_GPIO_05);
+			IF_ERR_RETURN(bzRetAct);
+	
+			bzRetAct=BZ_setGpioDirection(hw_priv,BZ_GPIO_DIR_IN, BZ_GPIO_05);
+			IF_ERR_RETURN(bzRetAct);
+			
+			bzRetAct=BZ_setGpioFuncSel(hw_priv,BZ_SEL_4, BZ_GPIO_05);
+			IF_ERR_RETURN(bzRetAct);
+			break;
+		case BZ_ORX2:
+			bzRetAct=BZ_setGpioSourceCtrl(hw_priv, BZ_SPI_CTRL, BZ_GPIO_06);
+			IF_ERR_RETURN(bzRetAct);
+	
+			bzRetAct=BZ_setGpioDirection(hw_priv,BZ_GPIO_DIR_IN, BZ_GPIO_06);
+			IF_ERR_RETURN(bzRetAct);
+			
+			bzRetAct=BZ_setGpioFuncSel(hw_priv,BZ_SEL_4, BZ_GPIO_06);
+			IF_ERR_RETURN(bzRetAct);
+			break;
+		default:
+			return (uint32_t)BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RX,
+					BZ_ERR_TXRXORX_CHANNLE,bzRetAct,BZ_ERR_CHECK_PARAM);
+	}
+	return (uint32_t)bzRetAct;	
+}
+
+uint32_t BZ_getRxDecPower(BzDevice_t *hw_priv, BzRxChannels_t rxChannel, sint16_t *rxDecPower_dBFS)
+{
+	BzRecoveryActions_t bzRetAct=BZ_NO_ACTION;
+	bzHalErr halStatus=BZHAL_OK;
+	
+    uint32_t rxDecPower = 0;
+	
+	BzData DataInfo;
+	BzCmdTx *pMsg;
+	
+	BZ_Memset(&DataInfo,0,sizeof(BzData));
+	pMsg=&DataInfo.u.Tx;
+	
+	DataInfo.CmdType=0xff;
+	pMsg->Cmd=BZ_SET_OPCODE;
+
+	DataInfo.u.Tx.TxData.value=(HI_GET_DACPOWER|(rxChannel<<16));
+	
+	bzRetAct=BZ_sendRiscvCmd(hw_priv,(void*)&DataInfo,IOCTL_WRITE_CMD);
+	IF_ERR_RETURN(bzRetAct);
+	
+	halStatus=BZ_spiReadReg(hw_priv,SEND_CMD_DATA,&rxDecPower);
+	bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RISCV,halStatus,bzRetAct,BZ_ERR_RESET_SPI);
+	IF_ERR_RETURN(bzRetAct);
+
+	*rxDecPower_dBFS=(sint16_t)rxDecPower;
+    return (uint32_t)bzRetAct;
+}
+uint32_t BZ_getORxDecPower(BzDevice_t *hw_priv, BzObsRxChannels_t orxChannel, sint16_t *orxDecPower_dBFS)
+{
+	BzRecoveryActions_t bzRetAct=BZ_NO_ACTION;
+	bzHalErr halStatus=BZHAL_OK;
+	
+    uint32_t orxDecPower = 0;
+	
+	BzData DataInfo;
+	BzCmdTx *pMsg;
+	
+	BZ_Memset(&DataInfo,0,sizeof(BzData));
+	pMsg=&DataInfo.u.Tx;
+	
+	DataInfo.CmdType=0xff;
+	pMsg->Cmd=BZ_SET_OPCODE;
+
+	DataInfo.u.Tx.TxData.value=(HI_GET_ORXDACPOWER|(orxChannel<<16));
+
+	bzRetAct=BZ_sendRiscvCmd(hw_priv,(void*)&DataInfo,IOCTL_WRITE_CMD);
+	IF_ERR_RETURN(bzRetAct);
+	
+	halStatus=BZ_spiReadReg(hw_priv,SEND_CMD_DATA,&orxDecPower);
+	bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RISCV,halStatus,bzRetAct,BZ_ERR_RESET_SPI);
+	IF_ERR_RETURN(bzRetAct);
+
+	*orxDecPower_dBFS=(sint32_t)orxDecPower;
+    return (uint32_t)bzRetAct;
+}
+
