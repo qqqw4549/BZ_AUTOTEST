@@ -528,7 +528,7 @@ uint32_t read_reg(uint16_t addr)
 {
     uint32_t data;
    BZ_spiReadReg(DEVICE_HANDLE,addr,&data);
-   //BZ_PRINT("readreg 0x%x value = 0x%x\n",addr,data);
+   BZ_PRINT("readreg 0x%x value = 0x%x\n",addr,data);
    return data;
 }
 uint32_t read_regbit(uint16_t addr,uint32_t endbit,uint32_t startbit)
@@ -871,6 +871,16 @@ void sysref_control(uint32_t ONOFF)
     }else {
         BZ_PRINT("Undefined VALLUE \n 1. BZ_JES204B_SYSREF_ON = 1 \n 2.BZ_JES204B_SYSREF_OFF = 0 \n");
     }
+}
+
+void paprotection()
+{
+    BzTxPaProtectCfg_t stPaProCfg = {
+        .TxCaliCnt = 1,
+        .TxPowerThreshold = 3000 ,
+        .Enable = 1 
+    };
+    BZ_setPaProtectionCfg(DEVICE_HANDLE,&stPaProCfg);
 }
 
 void en_slicer(uint32_t channels,uint32_t enable)

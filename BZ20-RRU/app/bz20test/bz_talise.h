@@ -70,4 +70,5 @@ void set_agc();
 void riscv_trace();
 void getorxgainCtrl();
 uint32_t setorxgain(uint32_t channels ,uint8_t gainIndexOrx);
+void paprotection();
 #endif

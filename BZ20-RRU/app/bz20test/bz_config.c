@@ -90,7 +90,7 @@ BzInit_t B20Init =
 			},
 			.rxSlicerPinFunc = BZ_SEL_3,  		 /*GPIO function select 0-7: make GPIO function slicer function */
 		},
-        .rxChannels = BZ_RXOFF      		/* Select The enable rx channel */
+        .rxChannels = BZ_RX1RX2      		/* Select The enable rx channel */
     },
 
     /* Tx settings */

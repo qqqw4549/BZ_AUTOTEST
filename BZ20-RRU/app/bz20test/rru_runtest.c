@@ -131,6 +131,7 @@ void rru_run_test(void)
     RegisterCommand("setagc","设置agc：rxpower adcchannels",(void *)set_agc);
     RegisterCommand("log","打印riscvlog",(void *)getlog);
     RegisterCommand("bt","打印riscvtrace",(void *)riscv_trace);
+    RegisterCommand("paprotect","测试PA保护",(void *)paprotection);
 }
 
 
