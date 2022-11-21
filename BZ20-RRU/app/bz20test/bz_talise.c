@@ -877,7 +877,7 @@ void paprotection()
 {
     BzTxPaProtectCfg_t stPaProCfg = {
         .TxCaliCnt = 1,
-        .TxPowerThreshold = 3000 ,
+        .TxPowerThreshold = 100 ,
         .Enable = 1 
     };
     BZ_setPaProtectionCfg(DEVICE_HANDLE,&stPaProCfg);
