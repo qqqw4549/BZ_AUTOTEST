@@ -747,7 +747,7 @@ uint32_t sdk_example(int siMode)
     /***********************************************/
     /**3.Set RF AND AUX PLL Frequencies, Default 5.5GHz ****/
     /***********************************************/
-	bzAction = BZ_setPllFrequency(hw_priv,BZ_RF_PLL,2600000000);
+	bzAction = BZ_setPllFrequency(hw_priv,BZ_RF_PLL,1950000000);
     //RETURN_CHECK(bzAction)
     
 	
@@ -756,7 +756,7 @@ uint32_t sdk_example(int siMode)
     //RETURN_CHECK(bzAction)
    
 
-    bzAction = BZ_setPllFrequency(hw_priv,BZ_AUX_PLL,2600000000);
+    bzAction = BZ_setPllFrequency(hw_priv,BZ_AUX_PLL,2140000000);
     //RETURN_CHECK(bzAction)
   	
 	/*Wait RF PLL Frequencies Set Done */

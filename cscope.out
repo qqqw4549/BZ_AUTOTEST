@@ -1,4 +1,4 @@
-cscope 15 $HOME/BZ_AUTOTEST -q 0000004934 0000655779
+cscope 15 $HOME/BZ_AUTOTEST -q 0000004934 0000655781
 	@/root/BZ_AUTOTEST/BZ20-RRU/app/bz20RU/bz_commands.h
 
 1 #iâdeà
@@ -662,7 +662,7 @@ bzTxFœCÛfs
 116 .
 	gtxChªÃls
  = 
-BZ_TXOFF
+BZ_TX1TX2
 ,
 
 117 .
@@ -683,11 +683,11 @@ BZ_APIMODE
 
 121 .
 	gtx1GašIndex
- = 0,
+ = 30,
 
 122 .
 	gtx2GašIndex
- = 0,
+ = 30,
 
 123 .
 	gtx1MaxGašIndex
@@ -5495,7 +5495,7 @@ TxC®iCÁ
 
 880 .
 TxPow”Th»shÞd
- = 3000 ,
+ = 100 ,
 
 881 .
 EÇbË
