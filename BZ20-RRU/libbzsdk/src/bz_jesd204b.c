@@ -195,6 +195,118 @@ uint32_t BZ_Prbs7Check(BzDevice_t *hw_priv,uint32_t LaneId)
 	return (uint32_t)bzRetAct;	
 }
 
+uint32_t BZ_SetPrbs15_SystemTx(BzDevice_t *hw_priv,uint32_t enable)
+{   
+	BzRecoveryActions_t bzRetAct=BZ_NO_ACTION;
+   	
+	BzData DataInfo;
+	BzCmdTx *pMsg=NULL;
+	DataInfo.CmdType=0xff;
+	pMsg=&DataInfo.u.Tx;
+	pMsg->Cmd=BZ_SET_OPCODE;
+	pMsg->TxData.value=(((enable &0xffff)<<16)|(HI_GET_PRBS15_SYSTEM_TX));	
+	BZHAL_Printf("%s,%d,enable=%d\n",__func__, __LINE__, enable);
+
+	bzRetAct=BZ_sendRiscvCmd(hw_priv,(void*)&DataInfo,IOCTL_WRITE_CMD);
+	IF_ERR_RETURN(bzRetAct);
+	
+	return bzRetAct;
+}
+
+uint32_t BZ_GetPrbs15_SystemTxInfo(BzDevice_t *hw_priv,uint32_t *enable)
+{   
+	BzRecoveryActions_t bzRetAct=BZ_NO_ACTION;
+	uint32_t regValue = 0;
+	uint32_t lane_recv_data_count = 0;
+	uint32_t lane_error_count = 0;	
+
+	bzRetAct=BZ_spiReadMem(hw_priv, 0x25006134, &regValue);
+	IF_ERR_RETURN(bzRetAct);
+
+	*enable = regValue&0x0f;
+
+	if((*enable)&(0x01<<0))
+	{
+		//lane0
+		bzRetAct=BZ_spiReadMem(hw_priv, 0x25006200, &lane_recv_data_count);
+		IF_ERR_RETURN(bzRetAct);	
+		bzRetAct=BZ_spiReadMem(hw_priv, 0x25006140, &lane_error_count);
+		IF_ERR_RETURN(bzRetAct);
+		BZHAL_Printf("lane0_recv_data_count=%u, lane0_error_count=%u\n", lane_recv_data_count, lane_error_count);
+	}
+	
+	if((*enable)&(0x01<<1))
+	{	
+		//lane1
+		bzRetAct=BZ_spiReadMem(hw_priv, 0x25006204, &lane_recv_data_count);
+		IF_ERR_RETURN(bzRetAct);	
+		bzRetAct=BZ_spiReadMem(hw_priv, 0x25006144, &lane_error_count);
+		IF_ERR_RETURN(bzRetAct);
+		BZHAL_Printf("lane1_recv_data_count=%u, lane1_error_count=%u\n", lane_recv_data_count, lane_error_count);
+	}
+
+	if((*enable)&(0x01<<2))
+	{
+		//lane2
+		bzRetAct=BZ_spiReadMem(hw_priv, 0x25006208, &lane_recv_data_count);
+		IF_ERR_RETURN(bzRetAct);	
+		bzRetAct=BZ_spiReadMem(hw_priv, 0x25006148, &lane_error_count);
+		IF_ERR_RETURN(bzRetAct);
+		BZHAL_Printf("lane2_recv_data_count=%u, lane2_error_count=%u\n", lane_recv_data_count, lane_error_count);
+	}
+
+	if((*enable)&(0x01<<3))
+	{	
+		//lane3
+		bzRetAct=BZ_spiReadMem(hw_priv, 0x2500620c, &lane_recv_data_count);
+		IF_ERR_RETURN(bzRetAct);	
+		bzRetAct=BZ_spiReadMem(hw_priv, 0x2500614c, &lane_error_count);
+		IF_ERR_RETURN(bzRetAct);
+
+		BZHAL_Printf("lane3_recv_data_count=%u, lane3_error_count=%u\n", lane_recv_data_count, lane_error_count);
+	}
+	
+	return bzRetAct;
+}
+
+
+
+uint32_t BZ_SetPrbs15_SystemRxORx(BzDevice_t *hw_priv,uint32_t enable)
+{   
+	BzRecoveryActions_t bzRetAct=BZ_NO_ACTION;
+   	
+	BzData DataInfo;
+	BzCmdTx *pMsg=NULL;
+	DataInfo.CmdType=0xff;
+	pMsg=&DataInfo.u.Tx;
+	pMsg->Cmd=BZ_SET_OPCODE;
+	pMsg->TxData.value=(((enable &0xffff)<<16)|(HI_SET_PRBS15_SYSTEM_RX_ORX));	
+	BZHAL_Printf("%s,%d,enable=%d\n",__func__, __LINE__, enable);
+
+	bzRetAct=BZ_sendRiscvCmd(hw_priv,(void*)&DataInfo,IOCTL_WRITE_CMD);
+	IF_ERR_RETURN(bzRetAct);
+	
+	return bzRetAct;
+}
+
+uint32_t BZ_GetPrbs15_SystemRxORx_EnableStatus(BzDevice_t *hw_priv,uint32_t *rx_enable,uint32_t *orx_enable)
+{   
+	BzRecoveryActions_t bzRetAct=BZ_NO_ACTION;
+	uint32_t regValue = 0;
+
+	bzRetAct=BZ_spiReadMem(hw_priv, 0x25007134, &regValue);
+	IF_ERR_RETURN(bzRetAct);
+	*rx_enable = regValue&0x03;
+
+	bzRetAct=BZ_spiReadMem(hw_priv, 0x25008134, &regValue);
+	IF_ERR_RETURN(bzRetAct);
+	*orx_enable = regValue&0x03;
+
+	
+	return bzRetAct;
+}
+
+
 /*Get debug data */
 uint32_t BZ_spiGetJesdDebugData(BzDevice_t *hw_priv, uint32_t addr, uint32_t sample_point, uint32_t count,uint32_t sample_rate)
 {

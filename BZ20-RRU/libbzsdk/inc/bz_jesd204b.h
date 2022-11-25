@@ -53,6 +53,45 @@ uint32_t BZ_Jes204bSysrefControl(BzDevice_t *priv, BzJes204bSysrefControlMode Mo
  * \retval BZHAL_OK means function completed successfully, otherwise it will fail
  */
 uint32_t BZ_Prbs7Check(BzDevice_t *hw_priv,uint32_t LaneId);
+
+/**
+ * \brief set prbs15 system tx enable/disabled
+ *
+ * \param device Pointer to the B20 data structure containing settings
+ *
+ * \retval BZHAL_OK means function completed successfully, otherwise it will fail
+ */
+uint32_t BZ_SetPrbs15_SystemTx(BzDevice_t *hw_priv,uint32_t enable);
+
+/**
+ * \brief get prbs15 system tx info(Include enable and statistics info)
+ *
+ * \param device Pointer to the B20 data structure containing settings
+ *
+ * \retval BZHAL_OK means function completed successfully, otherwise it will fail
+ */
+uint32_t BZ_GetPrbs15_SystemTxInfo(BzDevice_t *hw_priv,uint32_t *enable);
+
+/**
+ * \brief set prbs15 system rx/orx enable/disabled
+ *
+ * \param device Pointer to the B20 data structure containing settings
+ *
+ * \retval BZHAL_OK means function completed successfully, otherwise it will fail
+ */
+uint32_t BZ_SetPrbs15_SystemRxORx(BzDevice_t *hw_priv,uint32_t enable);
+
+/**
+ * \brief get prbs15 system rx/orx enable status
+ *
+ * \param device Pointer to the B20 data structure containing settings
+ *
+ * \retval BZHAL_OK means function completed successfully, otherwise it will fail
+ */
+uint32_t BZ_GetPrbs15_SystemRxORx_EnableStatus(BzDevice_t *hw_priv,uint32_t *rx_enable,uint32_t *orx_enable);
+
+
+
 /**
  * \brief configures the Jes204b prbs7 control mode
  *
@@ -60,6 +99,7 @@ uint32_t BZ_Prbs7Check(BzDevice_t *hw_priv,uint32_t LaneId);
  * \param addr setDebug addr of Data
  * \param sample_point Desired Jes204b sample point
  * \param count setDebug count of Data
+ * \param sample_rate < 1:2505Mhz, 2:5005Mhz >
  *
  * \retval BZHAL_OK means function completed successfully, otherwise it will fail
  */

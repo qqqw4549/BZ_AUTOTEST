@@ -15,11 +15,6 @@
 #include"bz_plat_hal_types.h"
 #include "bz_types.h"
 
-#ifndef BZHAL_Printf
-#include <stdio.h>
-#define BZHAL_Printf printf 
-#endif
-
 /** lower two bits indicate debug level
  * - 0 all
  * - 1 warning
@@ -52,6 +47,10 @@
 #endif /* DEBUG_VERSION */
 
 #define IF_ERR_RETURN(a) if(a != BZ_NO_ACTION) { BZHAL_Printf("SPI CONF ERROR\n"); return a; }
+#define POINTER_CHECK(p) if(p == NULL){ BZHAL_Printf("[ERROR]:POINTER_NULL(function:%s) %s(Line:%d)" \
+                                        ,__FUNCTION__,__FILE__,__LINE__);                            \
+                                        return BZ_ERR_NULL_POINTER;}
+
 
 /**
  * \brief 

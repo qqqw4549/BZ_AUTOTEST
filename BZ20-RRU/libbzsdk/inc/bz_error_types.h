@@ -78,6 +78,7 @@ typedef enum
     BZ_ERR_RESET_SPI	= 0x4,         
     BZ_ERR_RESET_GPIO	= 0x5,         
     BZ_ERR_CHECK_PARAM	= 0x6,       
+    BZ_ERR_NULL_POINTER = 0x7,
 }BzRecoveryActions_t;
 
 #endif /* B20_ERROR_TYPES_H_ */

@@ -1,12 +1,11 @@
 #ifndef __BZ_HAL_H__
 #define __BZ_HAL_H__
-#include <stdio.h>
 
 #include "bz_plat_hal_types.h"
 
-#ifndef BZHAL_Printf
-#define BZHAL_Printf printf
-#endif
+//#ifndef BZHAL_Printf
+//#define BZHAL_Printf printf
+//#endif
 
 typedef struct BzHalHandle* bzHalHandle;
 

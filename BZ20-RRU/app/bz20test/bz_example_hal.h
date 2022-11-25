@@ -2,7 +2,6 @@
 #define __BZ_HAL_H__
 typedef void* bzHalHandle;
 #include "bz_plat_hal_types.h"
-#include <stdio.h>
 //#ifndef BZHAL_Printf
 //#define     BZHAL_Printf printf 
 //#endif

@@ -118,8 +118,8 @@ BzInit_t B20Init =
         {
             .txgainMode 	  = BZ_MGC, /* The MGC mode setting(0)*/
 			.txmgcMode		  = BZ_APIMODE,/* The Ways for mgcMode(0) */
-			.tx1GainIndex	  = 30,   	/* The tx1GainIndex setting(0,63) */
-			.tx2GainIndex	  = 30,		/* The tx2GainIndex setting(0,63) */
+			.tx1GainIndex	  = 0,   	/* The tx1GainIndex setting(0,63) */
+			.tx2GainIndex	  = 0,		/* The tx2GainIndex setting(0,63) */
 			.tx1MaxGainIndex = 63,		/* The Tx1 GainMax index 63*/
 			.tx1MinGainIndex = 0,		/* The Tx1 GainMin index 0*/
 			.tx2MaxGainIndex = 63,		/* The Tx2 GainMax index 63*/

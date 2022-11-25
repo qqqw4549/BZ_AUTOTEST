@@ -44,10 +44,14 @@
 #define HI_GET_DACPOWER 		        0x41
 #define HI_GET_ORXDACPOWER 		        0x42
 
-#define RECV_CMD_CONFIRM  				REG_RSV
-#define SEND_CMD_TYPE  					REG_RSV_1
-#define SEND_CMD_DATA					REG_RSV_2
-#define DOCMD_STATUS					REG_RSV_3
+#define HI_GET_PRBS15_SYSTEM_TX 		0x43
+#define HI_SET_PRBS15_SYSTEM_RX_ORX     0x44
+
+
+#define RECV_CMD_CONFIRM  				  REG_RSV
+#define SEND_CMD_TYPE  					  REG_RSV_1
+#define SEND_CMD_DATA					  REG_RSV_2
+#define DOCMD_STATUS					  REG_RSV_3
 
 #define DBG_PRINT_BUF_SIZE_MAX 			 256
 

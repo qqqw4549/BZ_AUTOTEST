@@ -157,18 +157,16 @@ uint32_t BZ_setRadioCtrlSpiMode(BzDevice_t *hw_priv, BzRxChannels_t rxChannel,Bz
 			bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RADIO,halstatus,bzRetAct,BZ_ERR_RESET_SPI);
 			IF_ERR_RETURN(bzRetAct);
 			
-			halstatus=BZ_spiWriteField(hw_priv, REG_TXLPF0, 0x0, 8, 8);	
+			halstatus=BZ_spiWriteField(hw_priv, REG_TXLPF0, 0x1, 8, 8);	
 			bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RADIO,halstatus,bzRetAct,BZ_ERR_RESET_SPI);
 			IF_ERR_RETURN(bzRetAct);				
 
-            halstatus=BZ_spiWriteField(hw_priv, REG_TXLPF3, 0x1, 8, 8);
+            halstatus=BZ_spiWriteField(hw_priv, REG_TXLPF3, 0x0, 8, 8);
 			bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RADIO,halstatus,bzRetAct,BZ_ERR_RESET_SPI);
 			IF_ERR_RETURN(bzRetAct);
-
             halstatus=BZ_spiWriteField(hw_priv, REG_PD0, 0x1, 9, 8);
 			bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RADIO,halstatus,bzRetAct,BZ_ERR_RESET_SPI);
 			IF_ERR_RETURN(bzRetAct);
-
 			break;
 	    case BZ_TX2: 
             // Enable TX2
@@ -180,18 +178,16 @@ uint32_t BZ_setRadioCtrlSpiMode(BzDevice_t *hw_priv, BzRxChannels_t rxChannel,Bz
 			bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RADIO,halstatus,bzRetAct,BZ_ERR_RESET_SPI);
 			IF_ERR_RETURN(bzRetAct);
 			
-			halstatus=BZ_spiWriteField(hw_priv, REG_TXLPF0, 0x1, 8, 8);	
+			halstatus=BZ_spiWriteField(hw_priv, REG_TXLPF0, 0x0, 8, 8);	
 			bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RADIO,halstatus,bzRetAct,BZ_ERR_RESET_SPI);
 			IF_ERR_RETURN(bzRetAct);				
 
-            halstatus=BZ_spiWriteField(hw_priv, REG_TXLPF3, 0x0, 8, 8);
+            halstatus=BZ_spiWriteField(hw_priv, REG_TXLPF3, 0x1, 8, 8);
 			bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RADIO,halstatus,bzRetAct,BZ_ERR_RESET_SPI);
 			IF_ERR_RETURN(bzRetAct);	
-
             halstatus=BZ_spiWriteField(hw_priv, REG_PD0, 0x2, 9, 8);
 			bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RADIO,halstatus,bzRetAct,BZ_ERR_RESET_SPI);
 			IF_ERR_RETURN(bzRetAct);
-			 
 			break;
 	    case BZ_TX1TX2:
             halstatus=BZ_spiWriteField(hw_priv, REG_PD0, 0x0, 9, 8);
@@ -502,9 +498,7 @@ uint32_t BZ_setRadioCtrlPinMode(BzDevice_t *hw_priv, BzRxChannels_t rxChannel,Bz
 	BzRecoveryActions_t bzRetAct=BZ_NO_ACTION;
 	bzHalErr halStatus=BZHAL_OK;
 	
-    if((OrxChannel != BZ_RXOFF) && (rxChannel != BZ_ORXOFF))
-        IF_ERR_RETURN(BZ_ERR_CHECK_PARAM);
-
+	
 	halStatus=BZ_spiWriteField(hw_priv,REG_CH_ENA,0x21802,31,0);
 	bzRetAct=BZ_ApiErrHandler(hw_priv,BZ_ERRHDL_HAL_RADIO,halStatus,bzRetAct,BZ_ERR_RESET_SPI);
 	IF_ERR_RETURN(bzRetAct);	
@@ -580,6 +574,7 @@ uint32_t BZ_setRadioCtrlPinMode(BzDevice_t *hw_priv, BzRxChannels_t rxChannel,Bz
 		default:
 			break;
 	}
+
 	switch(rxChannel) {
 		case BZ_RXOFF:
 			/*disable RX1/RX2 channel*/
@@ -728,6 +723,7 @@ uint32_t BZ_waitPllsLockDone(BzDevice_t *hw_priv, uint32_t timeout)
     }
 	return (uint32_t)bzRetAct;	
 }
+
 uint32_t BZ_getRadioState(BzDevice_t *hw_priv)
 {
     BzRecoveryActions_t bzRetAct=BZ_NO_ACTION;

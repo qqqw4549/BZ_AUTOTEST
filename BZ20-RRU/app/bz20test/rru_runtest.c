@@ -3,7 +3,6 @@
 #include "bz_talise.h"
 #include "command.h"
 #include <unistd.h>
-#include <stdio.h>
 
 #define JESD204B_WAIT_MAX_COUNT 10
 #define JESD204B_WAIT_TIME 1000000 //1s

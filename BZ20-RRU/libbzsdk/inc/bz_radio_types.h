@@ -22,8 +22,8 @@ typedef enum
 typedef enum
 {
        BZ_OFF_Mask 			= 0x0,  /*!<Get radio Off state mask*/
-       BZ_BIT1_Mask 		= 0x1,	/*!<Get radio On state mask*/
-       BZ_BIT0_Mask 		= 0x2,	/*!<Get radio On state mask*/
+       BZ_BIT0_Mask 		= 0x1,	/*!<Get radio On state mask*/
+       BZ_BIT1_Mask 		= 0x2,	/*!<Get radio On state mask*/
        BZ_BIT0BIT1_Mask 	= 0x3	/*!<Get radio On state mask*/
 }BzBIT0BIT1Mask_t;
 /**

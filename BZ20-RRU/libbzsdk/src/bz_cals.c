@@ -11,8 +11,7 @@
 #include "bz_error.h"
 #include "bz_riscv.h"
 #include "bz_plat_hal.h"
-
-
+#include "bz_riscv_types.h"
 
 uint32_t BZ_runInitCals(BzDevice_t *hw_priv,uint32_t initCalMask)
 {	
@@ -48,7 +47,6 @@ uint32_t BZ_waitInitCalsDone(BzDevice_t *hw_priv,uint32_t timeout)
 		}
         uiTry--;
 	}
-    printf("try = %d\n",WIAT_TIMEOUT - uiTry);
     if(uiTry <= 0){ 
 		BZHAL_Printf("ERROR:%s Trytimeout!\n", __func__);
     }
